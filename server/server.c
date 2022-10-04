@@ -1,10 +1,9 @@
 #include <stdio.h>
 
+#include "config.h"
+
 int main(int argc, char* argv[]) {
-  printf("welcome to server\n");
-  printf("argument:%d\n", argc);
-  for (int i = 0; i < argc; i++) {
-    printf("%s\n", argv[i]);
-  }
+  printf("[WELCOME]welcome to server\n");
+  parseArgument(argc, argv);
   return 0;
 }

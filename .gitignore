@@ -1,3 +1,4 @@
 udp
 *.o
 server/server
+*.log
