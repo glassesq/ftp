@@ -28,6 +28,18 @@ enum ERROR {
   E_BIND,
   E_LISTEN,
   E_START_SOCKET,
+  E_SOCKET_WRONG,
+
+  /* socket */
+  E_READ_NOTHING,
+  E_READ_WRONG,
+  E_READ_EOF,
+  E_WRITE_WRONG,
+  E_WRITE_INCOMP,
+  E_OVER_BUFFER,
+
+  /* ftp */
+  E_NOT_UNDERSTAND,
 };
 
 /* write log to LOG_FILE */

@@ -1,4 +1,4 @@
-objects = error.o config.o utils.o file.o server.o ftp.o 
+objects = error.o config.o utils.o file.o server.o ftp.o ftpreply.o
 
 server : $(objects)
 	gcc -Wall -Werror -Wshadow -Wextra -pthread --std=c11 -o server $(objects) 
@@ -10,6 +10,7 @@ error.o :  error.h
 utils.o : utils.h 
 file.o : file.h
 ftp.o : ftp.h config.h
+ftpreply.o : ftp.h error.h
 
 .PHONY : clear
 clear :
