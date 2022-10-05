@@ -4,13 +4,14 @@
 
 #include <stdio.h>
 #include <time.h>
+#include <pthread.h>
 
 #include "utils.h"
 
 extern time_t TIMET;
 extern char LOG_FILE[];
 extern char NO_TIME[];
-
+extern pthread_mutex_t log_mutex;
 
 
 /* when using ERROR, under 0 */

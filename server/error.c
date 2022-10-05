@@ -1,5 +1,7 @@
 #include "error.h"
 
+pthread_mutex_t log_mutex;
+
 char LOG_FILE[] = "./logfile.log";
 char NO_TIME[] = "no timer available";
 time_t TIMET;
@@ -19,6 +21,7 @@ char* getTime(void) {
 }
 
 void logd(char* msg) {
+  pthread_mutex_lock(&log_mutex);
   if (LOG_FILE == NULL || msg == NULL) return;
   FILE* fp = NULL;
   fp = fopen(LOG_FILE, "a+");
@@ -26,9 +29,11 @@ void logd(char* msg) {
   fprintf(fp, "[%s][debug] %s\n", current, msg);
   printf("[%s][debug] %s\n", current, msg);
   fclose(fp);
+  pthread_mutex_unlock(&log_mutex);
 }
 
 void loge(char* msg) {
+  pthread_mutex_lock(&log_mutex);
   if (LOG_FILE == NULL || msg == NULL) return;
   FILE* fp = NULL;
   fp = fopen(LOG_FILE, "a+");
@@ -36,9 +41,11 @@ void loge(char* msg) {
   fprintf(fp, "[%s][error] %s\n", current, msg);
   printf("[%s][error] %s\n", current, msg);
   fclose(fp);
+  pthread_mutex_unlock(&log_mutex);
 }
 
 void logi(char* msg) {
+  pthread_mutex_lock(&log_mutex);
   if (LOG_FILE == NULL || msg == NULL) return;
   FILE* fp = NULL;
   fp = fopen(LOG_FILE, "a+");
@@ -46,9 +53,11 @@ void logi(char* msg) {
   fprintf(fp, "[%s][info] %s\n", current, msg);
   printf("[%s][info] %s\n", current, msg);
   fclose(fp);
+  pthread_mutex_unlock(&log_mutex);
 }
 
 void logw(char* msg) {
+  pthread_mutex_lock(&log_mutex);
   if (LOG_FILE == NULL || msg == NULL) return;
   FILE* fp = NULL;
   fp = fopen(LOG_FILE, "a+");
@@ -56,4 +65,5 @@ void logw(char* msg) {
   fprintf(fp, "[%s][warning] %s\n", current, msg);
   printf("[%s][warning] %s\n", current, msg);
   fclose(fp);
+  pthread_mutex_unlock(&log_mutex);
 }
