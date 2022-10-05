@@ -2,9 +2,9 @@
 #define FILE_H
 
 #include <stdlib.h>
-
-
-
+#include <dirent.h>
+#include <sys/stat.h>
+#include "error.h"
 
 /* check */
 

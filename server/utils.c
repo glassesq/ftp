@@ -1,5 +1,8 @@
 #include "utils.h"
 
+char formatb[BUFFER_SIZE];
+
+/* it is OK to use atoi, HOWEVER 0 may be confused */
 int str2int(char* src, int* tar) {
   if (src == NULL) return 0;
   removeChar(src, ' ');
@@ -51,4 +54,12 @@ void removeChar(char* src, char target) {
     ++cnt;
   }
   src[cnt] = '\0';
+}
+
+char* formatstr(char* format, ...) {
+  va_list args;
+  va_start(args, format);
+  int result = vsnprintf(formatb, BUFFER_SIZE, format, args);
+  if (result + 1 > BUFFER_SIZE) logw("overflow buffer when format str");
+  return formatb;
 }

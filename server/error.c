@@ -38,6 +38,22 @@ void loge(char* msg) {
   fclose(fp);
 }
 
-void logs(char* msg) {
-  printf("%s\n", msg);
+void logi(char* msg) {
+  if (LOG_FILE == NULL || msg == NULL) return;
+  FILE* fp = NULL;
+  fp = fopen(LOG_FILE, "a+");
+  char* current = getTime();
+  fprintf(fp, "[%s][info] %s\n", current, msg);
+  printf("[%s][info] %s\n", current, msg);
+  fclose(fp);
+}
+
+void logw(char* msg) {
+  if (LOG_FILE == NULL || msg == NULL) return;
+  FILE* fp = NULL;
+  fp = fopen(LOG_FILE, "a+");
+  char* current = getTime();
+  fprintf(fp, "[%s][warning] %s\n", current, msg);
+  printf("[%s][warning] %s\n", current, msg);
+  fclose(fp);
 }

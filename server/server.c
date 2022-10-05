@@ -1,9 +1,8 @@
 #include <stdio.h>
 
-#include "config.h"
+#include "ftp.h"
 
 int main(int argc, char* argv[]) {
-  printf("[WELCOME]welcome to server\n");
-  parseArgument(argc, argv);
+  startServer(argc, argv);
   return 0;
 }

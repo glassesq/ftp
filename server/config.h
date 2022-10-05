@@ -3,12 +3,13 @@
 
 #include <stdio.h>
 
-#include "file.h"
 #include "error.h"
+#include "file.h"
 
 struct ServerConfig {
   int port;
   char* root;
+  int max_connect; // max connection at the same time
 };
 
 /* config for FTP server */
