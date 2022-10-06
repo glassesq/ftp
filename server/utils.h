@@ -10,6 +10,12 @@
 
 extern char formatb[BUFFER_SIZE];
 
+/* remove the first [target]* from raw */
+void removeFirstSec(char* raw, char target);
+
+/* find out if it starts with target */
+int startswith(char* raw, char* target);
+
 /* write log to LOG_FILE [warning] */
 void logw(char* msg);
 

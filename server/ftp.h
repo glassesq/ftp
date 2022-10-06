@@ -19,16 +19,29 @@ extern pthread_t threads[MAX_CONN];
 extern int sk2th[MAX_CONN];
 extern char socket_buffer[BUFFER_SIZE];
 
-struct conn_info {
-  int id;
+enum FTPMode {
+  FTP_M_ERROR = -1,
+  FTP_M_PASV_LISTEN,    // now listen to tcp
+  FTP_M_PASV_ACCEPT,    // accept tcp, waiting command
+  FTP_M_PASV_TRANSFER,  // trasfering
+  FTP_M_EMPTY,          // empty
 };
 
 enum FTPType {
   FTP_ERROR = -1,
   FTP_USER = 0,
   FTP_PASS,
+  FTP_PASV,
   FTP_QUIT,
   FTP_LIST,
+};
+
+struct conn_info {
+  int id;
+  enum FTPMode mode;  // TODO: lock required
+  int dserver_socket;
+  int d_socket;
+  pthread_t d_thread;
 };
 
 struct request {
@@ -65,18 +78,40 @@ int sendReply(int socket, struct reply r);
 /* make a new thread and handle socket things */
 void runSocket(int socket);
 
+/* process the raw str, remove [...]USER[...]parameter[\r\n] */
+void processRaw(char* raw);
+
 /* see if there is a greeting */
 int greeting(int socket);
 
 /* socket is ok, now run FTP procedure */
-void runFTP(int socket);
+void runFTP(int socket, struct conn_info* info);
 
 /* parse a raw request to get a struct req */
 int parseRawRequest(char* raw, struct request* req);
 
+/* handle login in socket with (login)req and info */
 int handleLogin(int socket, struct request req, struct conn_info* info);
+
+/* handle pasv model */
+int handlePasv(int ftp_socket, struct request req, struct conn_info* info);
+
+/* new socket and bind to port */
+int newBindSocket(int port, char* address);
+
+/* handle unexpectely pass command */
+int handleUnexpPass(int const, struct request req, struct conn_info* info);
 
 /* good bye */
 void bye(void);
+
+/* sync run FTP main procedure */
+void* syncRun(void* socket_ptr);
+
+/* sync run FTP data procedure */
+void* syncData(void* info_ptr);
+
+/* clear data connection, not included the ftp_socket itself */
+void clearConn(struct conn_info* info);
 
 #endif

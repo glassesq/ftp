@@ -40,6 +40,9 @@ enum ERROR {
 
   /* ftp */
   E_NOT_UNDERSTAND,
+  E_DSOCKET,
+  E_THREAD,
+  E_MSG_FAIL, // fail to gen a right msg
 };
 
 /* write log to LOG_FILE */

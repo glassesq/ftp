@@ -63,3 +63,25 @@ char* formatstr(char* format, ...) {
   if (result + 1 > BUFFER_SIZE) logw("overflow buffer when format str");
   return formatb;
 }
+
+void removeFirstSec(char* raw, char target) {
+  if (raw == NULL) return;
+  int cnt = 0, len = strlen(raw);
+  int flag = 0;
+  for (int i = 0; i < len; i++) {
+    if (raw[i] != target) {
+      if (i > 0 && raw[i - 1] == target) flag = 1;
+      raw[cnt] = raw[i];
+      ++cnt;
+    } else if (flag) {
+      raw[cnt] = raw[i];
+      ++cnt;
+    }
+  }
+  raw[cnt] = '\0';
+}
+
+int startswith(char* raw, char* target) {
+  if( raw == NULL || target == NULL) return 0;
+  return strncmp(raw, target, strlen(target)) == 0;
+}

@@ -22,5 +22,8 @@ extern struct reply REPLY331;
 extern struct reply REPLY421;
 extern struct reply REPLY500;
 extern struct reply REPLY503;
+extern struct reply REPLY530;
+
+int genReply(struct reply* result, int code, char* data);
 
 #endif

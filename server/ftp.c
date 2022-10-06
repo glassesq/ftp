@@ -19,33 +19,57 @@ void init(void) {
   for (int i = 0; i < MAX_CONN; i++) sk2th[i] = -1;
 }
 
-int startListen(int port, int connection) {
-  init();
+int newBindSocket(int port, char* address) {
+  if (address == NULL) {
+    loge("address is NULL when try to make a new socket & bind it");
+    return E_BIND;
+  }
 
-  /* create the socket */
-  int server_socket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-  if (server_socket < 0) {
+  // TODO: use the real address
+  logw(formatstr("address [%s] provided, not using it now.", address));
+
+  int s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+  if (s < 0) {
     loge("failed to start socket");
     return E_START_SOCKET;
   }
-  logd(formatstr("server socket ok, it is %d.", server_socket));
 
   /* set server's address */
-  struct sockaddr_in server_addr;
-  memset(&server_addr, 0, sizeof(server_addr));
-  server_addr.sin_family = AF_INET;
-  server_addr.sin_port = htons(port);
-  server_addr.sin_addr.s_addr = htonl(INADDR_ANY);  // inet_addr("127.0.0.1")
-  logd("server addr generated");
+  struct sockaddr_in addr;
+  memset(&addr, 0, sizeof(addr));
+  addr.sin_family = AF_INET;
+  if (port < 0) {
+    logw(formatstr("port [%d] provided not ok, use any avaialble here", port));
+  } else
+    addr.sin_port = htons(port);
+  addr.sin_addr.s_addr = htonl(INADDR_ANY);  // inet_addr("127.0.0.1")
+  logd("addr generated");
 
   /* bind server to its address */
-  int ret =
-      bind(server_socket, (struct sockaddr*)&server_addr, sizeof(server_addr));
+  int ret = bind(s, (struct sockaddr*)&addr, sizeof(addr));
   if (ret < 0) {
     loge(formatstr("failed to bind to %d", port));
     return E_BIND;
   }
-  logd("bind ok");
+  logd(formatstr("new socket %d made. bind to port [%d](not-for-sure)", s,
+                 ntohs(addr.sin_port)));
+  return s;
+}
+
+int startListen(int port, int connection) {
+  init();
+
+  /* create the socket */
+  int server_socket;
+  int ret = newBindSocket(port, config.ip);
+  if (ret < 0) {
+    loge("server socket bind failed");
+    return E_BIND;
+  } else
+    server_socket = ret;
+
+  /* bind server to its address */
+  logi(formatstr("server_socket is ok. it is socket %d", server_socket));
 
   /* start listening */
   if ((ret = listen(server_socket, connection)) < 0) {
@@ -96,7 +120,7 @@ int readOneRequest(int socket, char* result) {
 
     if (former_r && result[count] == '\n') {
       result[count + 1] = '\0';
-      logi("one new request read");
+      logd("one new request read");
       return 1;
     }
 
@@ -151,18 +175,32 @@ int sendReply(int socket, struct reply r) {
   return 1;
 }
 
+void processRaw(char* raw) {
+  if (raw == NULL) return;
+  int len = strlen(raw);
+  if (raw[len - 1] == '\n' && raw[len - 2] == '\r') {
+    raw[len - 2] = '\0';
+    len -= 2;
+  }
+  if (raw[0] == ' ') removeFirstSec(raw, ' ');
+  removeFirstSec(raw, ' ');
+  logd(formatstr("raw information: [%d]", raw));
+}
+
 int parseRawRequest(char* raw, struct request* req) {
   if (req == NULL || raw == NULL) return E_NULL;
-  removeChar(raw, ' ');
-  removeChar(raw, '\r');
-  removeChar(raw, '\n');
+  processRaw(raw);
   /* 4-letter */
-  if (strncmp("USER", raw, 4) == 0) {
+  if (startswith(raw, "USER")) {
     req->type = FTP_USER;
     strcpy(req->params, raw + 4);
     return 1;
-  } else if (strncmp("PASS", raw, 4) == 0) {
+  } else if (startswith(raw, "PASS")) {
     req->type = FTP_PASS;
+    strcpy(req->params, raw + 4);
+    return 1;
+  } else if (startswith(raw, "PASV")) {
+    req->type = FTP_PASV;
     strcpy(req->params, raw + 4);
     return 1;
   }
@@ -171,14 +209,26 @@ int parseRawRequest(char* raw, struct request* req) {
 
 int greeting(int socket) { return sendReply(socket, REPLY220); }
 
-void runFTP(int socket) {
+void clearConn(struct conn_info* info) {
+  // TODO: gracefully maybe?
+  pthread_cancel(info->d_thread);
+  if (info->d_socket > 0) shutdown(info->d_socket, SHUT_RDWR);
+  if (info->dserver_socket > 0) shutdown(info->dserver_socket, SHUT_RDWR);
+  info->mode = FTP_M_EMPTY;
+}
+
+void runFTP(int socket, struct conn_info* info) {
+  if (info == NULL) return;
   int ret = greeting(socket);
   if (ret < 0) {
     loge(formatstr("socket %d close unexpectely", socket));
     return;
   }
-  struct conn_info info;
-  info.id = -1; /* not login at first */
+
+  info->id = -1;             /* not login at first */
+  info->dserver_socket = -1; /* not data socket by now */
+  info->d_socket = -1;
+  info->mode = FTP_ERROR;
 
   char result[BUFFER_SIZE];
   struct request req;
@@ -198,7 +248,16 @@ void runFTP(int socket) {
       switch (req.type) {
           /* handle request */
         case FTP_USER: {
-          if ((ret = handleLogin(socket, req, &info)) < 0) return;
+          if ((ret = handleLogin(socket, req, info)) == E_SOCKET_WRONG) return;
+          break;
+        }
+        case FTP_PASS: {
+          if ((ret = handleUnexpPass(socket, req, info)) == E_SOCKET_WRONG)
+            return;
+          break;
+        }
+        case FTP_PASV: {
+          if ((ret = handlePasv(socket, req, info)) == E_SOCKET_WRONG) return;
           break;
         }
         default: {
@@ -209,11 +268,21 @@ void runFTP(int socket) {
   }
 }
 
+int handleUnexpPass(int socket, struct request req, struct conn_info* info) {
+  int ret = sendReply(socket, REPLY503);
+  if (ret < 0) {
+    loge(formatstr("socket %d close unexpectely", socket));
+    return E_SOCKET_WRONG;
+  }
+  logi(formatstr("socket %d: recieve password [%s] unexpectly", socket,
+                 req.params));
+  return 1;
+}
+
 int handleLogin(int socket, struct request req, struct conn_info* info) {
   if (info->id >= 0) {
     logw("try to log in repeatedly");
-    sendReply(socket, REPLY500);
-    return 0;
+    // TODO: what happened here?
   }
 
   int ret = sendReply(socket, REPLY331);
@@ -236,14 +305,17 @@ int handleLogin(int socket, struct request req, struct conn_info* info) {
     logw(formatstr("socket %d cannot understand this request: %s", socket,
                    result));
     ret = sendReply(socket, REPLY500);
-    return E_NOT_UNDERSTAND;
+    return 1;
   }
 
   if (pass_req.type != FTP_PASS) {
     loge("not understand this command sequences");
     ret = sendReply(socket, REPLY503);
-    return E_NOT_UNDERSTAND;
+    return 1;
   }
+
+  logi(formatstr("socket %d: user [%s] login with password [%s]", socket,
+                 req.params, pass_req.params));
 
   // TODO: user / pass word check.
 
@@ -260,13 +332,125 @@ int handleLogin(int socket, struct request req, struct conn_info* info) {
   return 1;
 }
 
+int handlePasv(int ftp_socket, struct request req, struct conn_info* info) {
+  // TODO: check if there is already in some mode.
+  // TODO: clear the mode information and close the data thread.
+
+  int ret;
+  int dserver_socket = newBindSocket(-1, config.ip);
+  if (dserver_socket < 0) {
+    loge("error when try to make a new socket");
+    if ((ret = sendReply(ftp_socket, REPLY500)) < 0) {
+      loge(formatstr("socket %d close unexpectely", socket));
+      return E_SOCKET_WRONG;
+    }
+    return E_START_SOCKET;
+  }
+
+  struct sockaddr_in addr;
+  socklen_t slen = sizeof(addr);
+  ret = getsockname(dserver_socket, (struct sockaddr*)&addr, &slen);
+  if (ret < 0) {
+    loge("error when trying to reach the ip/port for data socket");
+    if ((ret = sendReply(ftp_socket, REPLY500)) < 0) {
+      loge(formatstr("socket %d close unexpectely", socket));
+      shutdown(dserver_socket, SHUT_RDWR);
+      return E_SOCKET_WRONG;
+    }
+    shutdown(dserver_socket, SHUT_RDWR);
+    return E_DSOCKET;
+  }
+
+  int port = ntohs(addr.sin_port);
+  logi(formatstr("data server socket %d is now in ip[%s] port[%d]",
+                 dserver_socket, inet_ntoa(addr.sin_addr), port));
+
+  if ((ret = listen(dserver_socket, config.max_connect)) < 0) {
+    loge("cannot listen");
+    shutdown(dserver_socket, SHUT_RDWR);
+    return E_LISTEN;
+  }
+  logi(formatstr("listen ok... data server listening at port %d", port));
+
+  /* update connection info: listen to dserver_socket */
+  info->dserver_socket = dserver_socket;
+  info->mode = FTP_M_PASV_LISTEN;
+
+  ret = pthread_create(&(info->d_thread), NULL, syncData, info);
+  if (ret < 0) {
+    loge("cannot create new thread to listen");
+    info->mode = FTP_M_EMPTY;
+    shutdown(dserver_socket, SHUT_RDWR);
+    return E_THREAD;
+  }
+
+  pthread_detach(ret);
+
+  char result[BUFFER_SIZE];
+  struct reply r;
+  ret = snprintf(result, BUFFER_SIZE, "=%s.%d.%d", inet_ntoa(addr.sin_addr),
+                 port / 256, port % 256);
+
+  if (ret < 0 || ret + 1 > BUFFER_SIZE) {
+    logw("failed to gen a message send back");
+    ret = sendReply(ftp_socket, REPLY500);
+    if (ret < 0) {
+      loge(formatstr("socket %d close unexpectely", socket));
+      shutdown(dserver_socket, SHUT_RDWR);
+      return E_SOCKET_WRONG;
+    }
+    shutdown(dserver_socket, SHUT_RDWR);
+    return E_MSG_FAIL;
+  }
+  genReply(&r, 227, result);
+
+  ret = sendReply(ftp_socket, r);
+  if (ret < 0) {
+    loge(formatstr("socket %d close unexpectely", socket));
+    shutdown(dserver_socket, SHUT_RDWR);
+    return E_START_SOCKET;
+  }
+
+  logi("PASV mode ok");
+
+  return 1;
+}
+
 void* syncRun(void* socket_ptr) {
   int socket = (int)(*((int*)socket_ptr));
   logi(formatstr("socket accept. This is now a socket %d", socket));
-  runFTP(socket);
+  struct conn_info info;
+  runFTP(socket, &info);
+  clearConn(&info);
+  shutdown(socket, SHUT_RDWR);
   int id = socket2thread(socket);
   sk2th[id] = -1;
   logi(formatstr("socket %d finish and release threads pool %d", socket, id));
+  return NULL;
+}
+
+void* syncData(void* info_ptr) {
+  struct conn_info* info = (struct conn_info*)info_ptr;
+  /* waiting someone connect the data port */
+  while (1) {
+    int new_socket = accept(info->dserver_socket, NULL,
+                            NULL);  // TODO: check ip address to avoid attacker
+    intd(new_socket);
+    logi("some one knock the data server door, we try to accept it");
+    if (new_socket < 0) {
+      loge("failed to accept connection");
+      continue;
+    }
+    logi("accept ok");
+    info->d_socket = new_socket;
+    break;
+  }
+  shutdown(info->dserver_socket, SHUT_RDWR);  // close the door
+
+  info->dserver_socket = -1;
+  info->mode = FTP_M_PASV_ACCEPT;
+  logi(formatstr("data connection established. Accept in socket %d",
+                 info->d_socket));
   return NULL;
 }
 

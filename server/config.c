@@ -5,7 +5,7 @@
 char DEFAULT_ROOT_PATH[] = "/tmp";
 
 struct ServerConfig config = {
-    .port = 21, .root = DEFAULT_ROOT_PATH, .max_connect = 1};
+    .port = 21, .root = DEFAULT_ROOT_PATH, .max_connect = 1, .ip = "0.0.0.0"};
 
 int parseArgument(int argc, char* argv[]) {
   int cnt = 1, ret;
