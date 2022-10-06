@@ -3,6 +3,7 @@
 
 #include <arpa/inet.h>
 #include <ctype.h>
+#include <fcntl.h>
 #include <netinet/in.h>
 #include <pthread.h>
 #include <stdio.h>
@@ -21,10 +22,9 @@ extern char socket_buffer[BUFFER_SIZE];
 
 enum FTPMode {
   FTP_M_ERROR = -1,
-  FTP_M_PASV_LISTEN,    // now listen to tcp
-  FTP_M_PASV_ACCEPT,    // accept tcp, waiting command
-  FTP_M_PASV_TRANSFER,  // trasfering
-  FTP_M_EMPTY,          // empty
+  FTP_M_PASV_LISTEN,  // now listen to tcp
+  FTP_M_PASV_ACCEPT,  // accept tcp, waiting command
+  FTP_M_EMPTY,        // empty
 };
 
 enum FTPType {
@@ -32,6 +32,7 @@ enum FTPType {
   FTP_USER = 0,
   FTP_PASS,
   FTP_PASV,
+  FTP_RETR,
   FTP_QUIT,
   FTP_LIST,
 };
@@ -42,6 +43,7 @@ struct conn_info {
   int dserver_socket;
   int d_socket;
   pthread_t d_thread;
+  char work_dir[BUFFER_SIZE];
 };
 
 struct request {
@@ -56,7 +58,7 @@ void init(void);
 int getNewThreadId(void);
 
 /* get its current thread[?] from socket id */
-int socket2thread(int socket);
+int socket2thread(int sock);
 
 /* start server with argc and argv. */
 void startServer(int argc, char* argv[]);
@@ -67,31 +69,40 @@ int startListen(int port, int connection);
 /* read at least one request from buffer to result in str format
 - if buffer is empty, read from/wait for socket
 - NULL for error*/
-int readOneRequest(int socket, char* result);
+int readOneRequest(int sock, char* result);
 
 /* read everything currently in socket, beacuse of a error */
-void clearSocket(int socket);
+void clearSocket(int sock);
 
 /* send reply to socket */
-int sendReply(int socket, struct reply r);
+int sendReply(int sock, struct reply r);
 
 /* make a new thread and handle socket things */
-void runSocket(int socket);
+void runSocket(int sock);
 
 /* process the raw str, remove [...]USER[...]parameter[\r\n] */
 void processRaw(char* raw);
 
 /* see if there is a greeting */
-int greeting(int socket);
+int greeting(int sock);
 
 /* socket is ok, now run FTP procedure */
-void runFTP(int socket, struct conn_info* info);
+void runFTP(int ftp_socket, struct conn_info* info);
+
+/* write raw to sock */
+int writeRaw(int sock, char* raw);
+
+/* write raw to sock */
+int writeFile(int sock, char* path);
 
 /* parse a raw request to get a struct req */
 int parseRawRequest(char* raw, struct request* req);
 
 /* handle login in socket with (login)req and info */
-int handleLogin(int socket, struct request req, struct conn_info* info);
+int handleLogin(int ftp_socket, struct request req, struct conn_info* info);
+
+/* handle RETR command */
+int handleRetr(int ftp_socket, struct request req, struct conn_info* info);
 
 /* handle pasv model */
 int handlePasv(int ftp_socket, struct request req, struct conn_info* info);

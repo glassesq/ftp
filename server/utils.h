@@ -1,12 +1,13 @@
 #ifndef UTILS_H
 #define UTILS_H
 
-#include <stdio.h>
 #include <stdarg.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #define BUFFER_SIZE 8192
+// PATH_MAX is 4096
 
 extern char formatb[BUFFER_SIZE];
 
@@ -29,7 +30,7 @@ int str2int(char* src, int* tar);
 char* int2str(int src);
 
 /* concat (former, latter) char array
-  pointer can be safely used 
+  pointer can be safely used
   [Warning] : memory LEAK here!
 */
 char* concat(char* former, char* latter);
@@ -37,10 +38,13 @@ char* concat(char* former, char* latter);
 /* remove target from char array src */
 void removeChar(char* src, char target);
 
+/* remove the very FIRST char from char array src */
+void removeFirstChar(char* src, char target);
+
 /* format a str printf-like to formatd
-   return value are fixed to global char array ptr formatb[]. 
-   
+   return value are fixed to global char array ptr formatb[].
+
  */
-char* formatstr(char* format, ...); 
+char* formatstr(char* format, ...);
 
 #endif

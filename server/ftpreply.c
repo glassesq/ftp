@@ -1,5 +1,12 @@
 #include "ftpreply.h"
 
+struct reply REPLY125 = {
+    .code = 125, .msg = "Data connection already open; transfer starting.\r\n"};
+
+struct reply REPLY150 = {
+    .code = 150,
+    .msg = "File status okay\r\nAbout to open data connection.\r\n"};
+
 struct reply REPLY220 = {.code = 220,
                          .msg = "FTP server ready for anonymous user\r\n"};
 
@@ -9,7 +16,7 @@ struct reply REPLY421 = {
 
 struct reply REPLY331 = {.code = 331,
                          .msg =
-                             "331 Guest login ok, send your complete e-mail "
+                             "Guest login ok, send your complete e-mail "
                              "address as password.\r\n"};
 
 struct reply REPLY230 = {.code = 230,
@@ -21,6 +28,21 @@ struct reply REPLY500 = {.code = 500,
 struct reply REPLY503 = {.code = 503, .msg = "Bad sequence of commands.\r\n"};
 
 struct reply REPLY530 = {.code = 530, .msg = "Bad sequence of commands.\r\n"};
+
+struct reply REPLY550E = {
+    .code = 550, .msg = "Requested action not taken.\r\nFile not found.\r\n"};
+
+struct reply REPLY550P = {
+    .code = 550, .msg = "Requested action not taken.\r\nNo access.\r\n"};
+
+struct reply REPLY425 = {
+    .code = 425,
+    .msg =
+        "Can not open data connection.\r\nNo established TCP connection.\r\n"};
+
+struct reply REPLY226 = {
+    .code = 226,
+    .msg = "Closing data connection.\r\nRequested file action successful\r\n"};
 
 int genReply(struct reply* result, int code, char* data) {
   if (result == NULL) return E_NULL;

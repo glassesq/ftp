@@ -81,6 +81,21 @@ void removeFirstSec(char* raw, char target) {
   raw[cnt] = '\0';
 }
 
+void removeFirstChar(char* src, char target) {
+  if (src == NULL) return;
+  int len = strlen(src);
+  int cnt = 0, flag = 0;
+  for (int i = 0; i < len; i++) {
+    if (!flag && src[i] == target) {
+      flag = 1;
+      continue;
+    }
+    src[cnt] = src[i];
+    ++cnt;
+  }
+  src[cnt] = '\0';
+}
+
 int startswith(char* raw, char* target) {
   if( raw == NULL || target == NULL) return 0;
   return strncmp(raw, target, strlen(target)) == 0;

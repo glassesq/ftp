@@ -2,7 +2,7 @@
 
 pthread_mutex_t log_mutex;
 
-char LOG_FILE[] = "./logfile.log";
+char LOG_FILE[] = "/home/glassesq/projects/ftpwork/server/logfile.log";
 char NO_TIME[] = "no timer available";
 time_t TIMET;
 

@@ -30,7 +30,7 @@ int parseArgument(int argc, char* argv[]) {
         if (ret == E_NOT_DIR) loge("invalid argument: root is not a directory");
         return 0;
       }
-      logd(formatstr("root directory set to %s", config.root));
+      logd(formatstr("root directory set to %s[absolute]", config.root));
       cnt += 2;
     } else {
       loge("invalid argument: not understand");

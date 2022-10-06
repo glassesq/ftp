@@ -6,9 +6,13 @@
 #include <sys/stat.h>
 #include "error.h"
 
+
 /* check */
 
 int checkDirectory(char*); 
+
 int checkFile(char*);
+
+int checkSub(char* child, char* parent);
 
 #endif

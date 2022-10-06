@@ -10,6 +10,8 @@ void startServer(int argc, char* argv[]) {
     bye();
     return;
   }
+  // TODO: wrap chdir
+  chdir(config.root);
   int ret = startListen(config.port, config.max_connect);
 }
 
@@ -98,23 +100,23 @@ int getNewThreadId(void) {
   return -1;
 }
 
-int socket2thread(int socket) {
+int socket2thread(int sock) {
   for (int i = 0; i < MAX_CONN; i++) {
-    if (sk2th[i] == socket) return i;
+    if (sk2th[i] == sock) return i;
   }
   return -1;
 }
 
-int readOneRequest(int socket, char* result) {
+int readOneRequest(int sock, char* result) {
   int count = 0, former_r = 0;
   while (1) {
-    int n = read(socket, result + count, 1);
+    int n = read(sock, result + count, 1);
     if (n == 0) {
       logd("read the EOF end but no \\r\\n here");
       return E_READ_EOF;
     }
     if (n < 0) {
-      logd("read go wrong, mostly beacuse the socket is closed");
+      logd("read go wrong, mostly beacuse the sock is closed");
       return E_READ_WRONG;
     }
 
@@ -128,6 +130,9 @@ int readOneRequest(int socket, char* result) {
       former_r = 1;
     else
       former_r = 1;
+
+    // TODO: illegal character check
+    if (result[count] == '\0') continue;
     count += n;
 
     /* need to read next char, but there is no space for '\0'(additonal +1) */
@@ -137,7 +142,7 @@ int readOneRequest(int socket, char* result) {
   }
 }
 
-int sendReply(int socket, struct reply r) {
+int sendReply(int sock, struct reply r) {
   int count = 0, former_r = 0;
   char raw[BUFFER_SIZE * 4];
 
@@ -162,17 +167,7 @@ int sendReply(int socket, struct reply r) {
   raw[cnt] = '\0';
   raw[lastd] = ' ';
 
-  int n = write(socket, raw, strlen(raw));
-  if (n < 0) {
-    logd("write go wrong, mostly beacuse the socket is closed");
-    return E_WRITE_WRONG;
-  }
-  if (n < cnt) {
-    logd("write");
-    return E_WRITE_INCOMP;
-  }
-
-  return 1;
+  return writeRaw(sock, raw);
 }
 
 void processRaw(char* raw) {
@@ -183,8 +178,8 @@ void processRaw(char* raw) {
     len -= 2;
   }
   if (raw[0] == ' ') removeFirstSec(raw, ' ');
-  removeFirstSec(raw, ' ');
-  logd(formatstr("raw information: [%d]", raw));
+  removeFirstChar(raw, ' ');
+  logd(formatstr("raw information: [%s]", raw));
 }
 
 int parseRawRequest(char* raw, struct request* req) {
@@ -193,7 +188,8 @@ int parseRawRequest(char* raw, struct request* req) {
   /* 4-letter */
   if (startswith(raw, "USER")) {
     req->type = FTP_USER;
-    strcpy(req->params, raw + 4);
+    strcpy(req->params,
+           raw + 4);  // +1 for the extra " " between command and parameter
     return 1;
   } else if (startswith(raw, "PASS")) {
     req->type = FTP_PASS;
@@ -203,11 +199,69 @@ int parseRawRequest(char* raw, struct request* req) {
     req->type = FTP_PASV;
     strcpy(req->params, raw + 4);
     return 1;
+  } else if (startswith(raw, "RETR")) {
+    req->type = FTP_RETR;
+    strcpy(req->params, raw + 4);
+    return 1;
   }
   return E_NOT_UNDERSTAND;
 }
 
-int greeting(int socket) { return sendReply(socket, REPLY220); }
+int writeRaw(int sock, char* raw) {
+  if (raw == NULL) return E_NULL;
+  int len = strlen(raw);  // the length of raw should be lower than 0x7fff0000
+                          // for write to be safe
+  int n = write(sock, raw, strlen(raw));
+  if (n < 0) {
+    logd("write go wrong, mostly beacuse the socket is closed");
+    return E_WRITE_WRONG;
+  }
+  if (n < len) {
+    logd("write incomplete");
+    return E_WRITE_INCOMP;
+  }
+  return 1;
+}
+
+int writeFile(int sock, char* path) {
+  char buffer[BUFFER_SIZE + 1];
+  // write it to socket
+  // stop when accident happens
+  int fd = open(path, O_RDONLY);
+  if (fd < 0) {
+    loge(formatstr("cannot open the target file [%s]", path));
+    return E_FILE_SYS;
+  }
+
+  int ret;
+  int count = 0;  // TODO: count should be long?
+  // read from file trunk by trunk.
+  while (1) {
+    int n = read(fd, buffer, BUFFER_SIZE);
+    if (n < 0) {
+      loge(formatstr("cannot read the target file", path));
+      return E_FILE_SYS;
+    }
+    if (n > 0) {
+      count += n;
+      buffer[n] = '\0';  // null-terminated
+      ret = writeRaw(sock, buffer);
+      if (ret < 0) {
+        loge(formatstr("cannot write to the data socket %d", sock));
+        return E_DSOCKET;
+      }
+    }
+    if (n < BUFFER_SIZE) {
+      /* it reach the file end, EOF will be sent later by shuting down */
+      break;
+    }
+  }
+  logi(formatstr("Finished to write file[%s] with %d bytes to socket %d", path,
+                 count, sock));
+  return 1;
+}
+
+int greeting(int sock) { return sendReply(sock, REPLY220); }
 
 void clearConn(struct conn_info* info) {
   // TODO: gracefully maybe?
@@ -217,113 +271,120 @@ void clearConn(struct conn_info* info) {
   info->mode = FTP_M_EMPTY;
 }
 
-void runFTP(int socket, struct conn_info* info) {
+void runFTP(int ftp_socket, struct conn_info* info) {
   if (info == NULL) return;
-  int ret = greeting(socket);
+  int ret = greeting(ftp_socket);
   if (ret < 0) {
-    loge(formatstr("socket %d close unexpectely", socket));
+    loge(formatstr("socket %d close unexpectely", ftp_socket));
     return;
   }
 
   info->id = -1;             /* not login at first */
   info->dserver_socket = -1; /* not data socket by now */
   info->d_socket = -1;
-  info->mode = FTP_ERROR;
+  info->mode = FTP_M_EMPTY;
+  strcpy(info->work_dir,
+         config.root); /* defautlt working dir is from the config */
 
   char result[BUFFER_SIZE];
   struct request req;
   while (1) {
-    int ret = readOneRequest(socket, result);
+    int ret = readOneRequest(ftp_socket, result);
     if (ret < 0) {
-      loge(formatstr("socket %d close unexpectely", socket));
+      loge(formatstr("socket %d close unexpectely", ftp_socket));
       return;
     }
-    logd(formatstr("socket %d read a new request: %s", socket, result));
     ret = parseRawRequest(result, &req);
     if (ret < 0) {
-      logw(formatstr("socket %d cannot understand this request: %s", socket,
+      logw(formatstr("socket %d cannot understand this request: %s", ftp_socket,
                      result));
-      sendReply(socket, REPLY500);
+      sendReply(ftp_socket, REPLY500);
     } else {
       switch (req.type) {
           /* handle request */
         case FTP_USER: {
-          if ((ret = handleLogin(socket, req, info)) == E_SOCKET_WRONG) return;
+          if ((ret = handleLogin(ftp_socket, req, info)) == E_SOCKET_WRONG)
+            return;
           break;
         }
         case FTP_PASS: {
-          if ((ret = handleUnexpPass(socket, req, info)) == E_SOCKET_WRONG)
+          if ((ret = handleUnexpPass(ftp_socket, req, info)) == E_SOCKET_WRONG)
             return;
           break;
         }
         case FTP_PASV: {
-          if ((ret = handlePasv(socket, req, info)) == E_SOCKET_WRONG) return;
+          if ((ret = handlePasv(ftp_socket, req, info)) == E_SOCKET_WRONG)
+            return;
+          break;
+        }
+        case FTP_RETR: {
+          if ((ret = handleRetr(ftp_socket, req, info)) == E_SOCKET_WRONG)
+            return;
           break;
         }
         default: {
-          sendReply(socket, REPLY500);
+          sendReply(ftp_socket, REPLY500);
         }
       }
     }
   }
 }
 
-int handleUnexpPass(int socket, struct request req, struct conn_info* info) {
-  int ret = sendReply(socket, REPLY503);
+int handleUnexpPass(int ftp_socket, struct request req,
+                    struct conn_info* info) {
+  int ret = sendReply(ftp_socket, REPLY503);
   if (ret < 0) {
-    loge(formatstr("socket %d close unexpectely", socket));
+    loge(formatstr("socket %d close unexpectely", ftp_socket));
     return E_SOCKET_WRONG;
   }
-  logi(formatstr("socket %d: recieve password [%s] unexpectly", socket,
+  logi(formatstr("socket %d: recieve password [%s] unexpectly", ftp_socket,
                  req.params));
   return 1;
 }
 
-int handleLogin(int socket, struct request req, struct conn_info* info) {
+int handleLogin(int sock, struct request req, struct conn_info* info) {
   if (info->id >= 0) {
     logw("try to log in repeatedly");
     // TODO: what happened here?
   }
 
-  int ret = sendReply(socket, REPLY331);
+  int ret = sendReply(sock, REPLY331);
   if (ret < 0) {
-    loge(formatstr("socket %d close unexpectely", socket));
+    loge(formatstr("socket %d close unexpectely", sock));
     return E_SOCKET_WRONG;
   }
   char result[BUFFER_SIZE];
 
   struct request pass_req;
-  ret = readOneRequest(socket, result);
+  ret = readOneRequest(sock, result);
   if (ret < 0) {
     return E_SOCKET_WRONG;
   }
-  logd(formatstr("socket %d read a new request: %s", socket, result));
-
   ret = parseRawRequest(result, &pass_req);
 
   if (ret < 0) {
-    logw(formatstr("socket %d cannot understand this request: %s", socket,
+    logw(formatstr("socket %d cannot understand this request: %s", sock,
                    result));
-    ret = sendReply(socket, REPLY500);
+    ret = sendReply(sock, REPLY500);
     return 1;
   }
 
   if (pass_req.type != FTP_PASS) {
     loge("not understand this command sequences");
-    ret = sendReply(socket, REPLY503);
+    ret = sendReply(sock, REPLY503);
     return 1;
   }
 
-  logi(formatstr("socket %d: user [%s] login with password [%s]", socket,
+  logi(formatstr("socket %d: user [%s] login with password [%s]", sock,
                  req.params, pass_req.params));
 
   // TODO: user / pass word check.
 
-  ret = sendReply(socket, REPLY230);
+  ret = sendReply(sock, REPLY230);
 
   if (ret < 0) {
     if (ret == E_SOCKET_WRONG) {
-      loge(formatstr("socket %d close unexpectely", socket));
+      loge(formatstr("socket %d close unexpectely", sock));
       return E_SOCKET_WRONG;
     }
   } else {
@@ -341,7 +402,7 @@ int handlePasv(int ftp_socket, struct request req, struct conn_info* info) {
   if (dserver_socket < 0) {
     loge("error when try to make a new socket");
     if ((ret = sendReply(ftp_socket, REPLY500)) < 0) {
-      loge(formatstr("socket %d close unexpectely", socket));
+      loge(formatstr("socket %d close unexpectely", ftp_socket));
       return E_SOCKET_WRONG;
     }
     return E_START_SOCKET;
@@ -353,7 +414,7 @@ int handlePasv(int ftp_socket, struct request req, struct conn_info* info) {
   if (ret < 0) {
     loge("error when trying to reach the ip/port for data socket");
     if ((ret = sendReply(ftp_socket, REPLY500)) < 0) {
-      loge(formatstr("socket %d close unexpectely", socket));
+      loge(formatstr("socket %d close unexpectely", ftp_socket));
       shutdown(dserver_socket, SHUT_RDWR);
       return E_SOCKET_WRONG;
     }
@@ -395,7 +456,7 @@ int handlePasv(int ftp_socket, struct request req, struct conn_info* info) {
     logw("failed to gen a message send back");
     ret = sendReply(ftp_socket, REPLY500);
     if (ret < 0) {
-      loge(formatstr("socket %d close unexpectely", socket));
+      loge(formatstr("socket %d close unexpectely", ftp_socket));
       shutdown(dserver_socket, SHUT_RDWR);
       return E_SOCKET_WRONG;
     }
@@ -406,26 +467,98 @@ int handlePasv(int ftp_socket, struct request req, struct conn_info* info) {
 
   ret = sendReply(ftp_socket, r);
   if (ret < 0) {
-    loge(formatstr("socket %d close unexpectely", socket));
+    loge(formatstr("socket %d close unexpectely", ftp_socket));
     shutdown(dserver_socket, SHUT_RDWR);
     return E_START_SOCKET;
   }
 
-  logi("PASV mode ok");
+  logi("PASV mode set ok");
+
+  return 1;
+}
+
+int handleRetr(int ftp_socket, struct request req, struct conn_info* info) {
+  int ret;
+
+  if (info->mode != FTP_M_PASV_ACCEPT) {
+    logw("tcp connection not prepared");
+    // TODO: port mode accept
+    ret = sendReply(ftp_socket, REPLY425);
+    if (ret < 0) {
+      loge(formatstr("socket %d close unexpectely", ftp_socket));
+      return E_SOCKET_WRONG;
+    }
+    return E_DSOCKET;
+  }
+  /* mode check ok, tcp connection is established */
+
+  char* path = realpath(req.params, NULL);
+  if (path == NULL) {
+    logw(formatstr(
+        "not exist : receive an unacceptable file path when RETR [%s]",
+        req.params));
+    if ((ret = sendReply(ftp_socket, REPLY550E)) < 0) {
+      loge(formatstr("socket %d close unexpectely", ftp_socket));
+      return E_SOCKET_WRONG;
+    }
+    info->mode = FTP_M_EMPTY;
+    return E_NOT_EXIST;
+  }
+
+  if (!checkSub(path, config.root)) {
+    logw(formatstr(
+        "no access : receive an unacceptable file path when RETR [%s]",
+        req.params));
+    if ((ret = sendReply(ftp_socket, REPLY550P)) < 0) {
+      loge(formatstr("socket %d close unexpectely", ftp_socket));
+      return E_SOCKET_WRONG;
+    }
+    info->mode = FTP_M_EMPTY;
+    return E_NO_ACCESS;
+  }
+  /* File check ok. Now trasfer it. */
+
+  logd(formatstr("file & mode checked for RETR, we are about to transfer [%s]",
+                 path));
+  if ((ret = sendReply(ftp_socket, REPLY150)) < 0) {
+    loge(formatstr("socket %d close unexpectely", ftp_socket));
+    return E_SOCKET_WRONG;
+  }
+
+  int d_socket = info->d_socket;
+
+  // In current thread, transfer the file to d_socket
+  ret = writeFile(d_socket, path);
+
+  // everything is done, then send ftp_socket the reply
+  if (ret != E_SOCKET_WRONG) {
+    if (ret < 0)
+      ret = sendReply(ftp_socket, REPLY500);
+    else
+      ret = sendReply(ftp_socket, REPLY226);
+  }
+  if (ret < 0) {
+    loge(formatstr("socket %d close unexpectely", ftp_socket));
+    return E_SOCKET_WRONG;
+  }
+
+  info->mode = FTP_M_EMPTY;
+  shutdown(d_socket, SHUT_RDWR);
 
   return 1;
 }
 
 void* syncRun(void* socket_ptr) {
-  int socket = (int)(*((int*)socket_ptr));
-  logi(formatstr("socket accept. This is now a socket %d", socket));
+  int ftp_socket = (int)(*((int*)socket_ptr));
+  logi(formatstr("ftp_socket accept. This is now a ftp_socket %d", ftp_socket));
   struct conn_info info;
-  runFTP(socket, &info);
+  runFTP(ftp_socket, &info);
   clearConn(&info);
-  shutdown(socket, SHUT_RDWR);
-  int id = socket2thread(socket);
+  shutdown(ftp_socket, SHUT_RDWR);
+  int id = socket2thread(ftp_socket);
   sk2th[id] = -1;
-  logi(formatstr("socket %d finish and release threads pool %d", socket, id));
+  logi(formatstr("ftp_socket %d finish and release threads pool %d", ftp_socket,
+                 id));
   return NULL;
 }
 
@@ -435,7 +568,6 @@ void* syncData(void* info_ptr) {
   while (1) {
     int new_socket = accept(info->dserver_socket, NULL,
                             NULL);  // TODO: check ip address to avoid attacker
-    intd(new_socket);
     logi("some one knock the data server door, we try to accept it");
     if (new_socket < 0) {
       loge("failed to accept connection");
@@ -454,14 +586,14 @@ void* syncData(void* info_ptr) {
   return NULL;
 }
 
-void runSocket(int socket) {
+void runSocket(int sock) {
   // TODO: try / catch
   int id = getNewThreadId();
   if (id < 0) {
     loge("no more space for new thread");
     return;
   }
-  sk2th[id] = socket;
+  sk2th[id] = sock;
   int ret = pthread_create(&threads[id], NULL, syncRun, &sk2th[id]);
   if (ret < 0) {
     loge("cannot create new thread");

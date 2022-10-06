@@ -2,9 +2,9 @@
 #define ERROR_H
 /* Error handler */
 
+#include <pthread.h>
 #include <stdio.h>
 #include <time.h>
-#include <pthread.h>
 
 #include "utils.h"
 
@@ -12,7 +12,6 @@ extern time_t TIMET;
 extern char LOG_FILE[];
 extern char NO_TIME[];
 extern pthread_mutex_t log_mutex;
-
 
 /* when using ERROR, under 0 */
 enum ERROR {
@@ -42,7 +41,9 @@ enum ERROR {
   E_NOT_UNDERSTAND,
   E_DSOCKET,
   E_THREAD,
-  E_MSG_FAIL, // fail to gen a right msg
+  E_NO_ACCESS,
+  E_FILE_SYS,
+  E_MSG_FAIL,  // fail to gen a right msg
 };
 
 /* write log to LOG_FILE */
