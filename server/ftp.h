@@ -34,7 +34,10 @@ enum FTPType {
   FTP_PASV,
   FTP_RETR,
   FTP_QUIT,
+  FTP_ABOR,
   FTP_LIST,
+  FTP_TYPE,
+  FTP_SYST,
 };
 
 struct conn_info {
@@ -104,14 +107,29 @@ int handleLogin(int ftp_socket, struct request req, struct conn_info* info);
 /* handle RETR command */
 int handleRetr(int ftp_socket, struct request req, struct conn_info* info);
 
-/* handle pasv model */
+/* handle PASV mode */
 int handlePasv(int ftp_socket, struct request req, struct conn_info* info);
+
+/* handle TYPE (I) only */
+int handleType(int ftp_socket, struct request req, struct conn_info* info);
+
+/* handle SYST */
+int handleSyst(int ftp_socket, struct request req, struct conn_info* info);
+
+/* handle QUIT and quit*/
+int handleQuit(int ftp_socket, struct request req, struct conn_info* info);
+
+/* handle ABOR and quit */
+int handleAbor(int ftp_socket, struct request req, struct conn_info* info);
 
 /* new socket and bind to port */
 int newBindSocket(int port, char* address);
 
 /* handle unexpectely pass command */
 int handleUnexpPass(int const, struct request req, struct conn_info* info);
+
+/* check if it has logged in. */
+int checkLogin(int ftp_socket, struct conn_info* info);
 
 /* good bye */
 void bye(void);

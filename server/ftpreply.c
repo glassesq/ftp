@@ -7,8 +7,13 @@ struct reply REPLY150 = {
     .code = 150,
     .msg = "File status okay\r\nAbout to open data connection.\r\n"};
 
+struct reply REPLY215 = {.code = 215, .msg = "UNIX Type: L8\r\n"};
+
 struct reply REPLY220 = {.code = 220,
                          .msg = "FTP server ready for anonymous user\r\n"};
+
+struct reply REPLY221 = {
+    .code = 221, .msg = "Thank you for using the FTP service\r\nGood bye.\r\n"};
 
 struct reply REPLY421 = {
     .code = 421,
@@ -27,7 +32,7 @@ struct reply REPLY500 = {.code = 500,
 
 struct reply REPLY503 = {.code = 503, .msg = "Bad sequence of commands.\r\n"};
 
-struct reply REPLY530 = {.code = 530, .msg = "Bad sequence of commands.\r\n"};
+struct reply REPLY530 = {.code = 530, .msg = "Not logged in.\r\n"};
 
 struct reply REPLY550E = {
     .code = 550, .msg = "Requested action not taken.\r\nFile not found.\r\n"};

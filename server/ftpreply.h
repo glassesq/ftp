@@ -18,7 +18,9 @@ struct reply {
 
 extern struct reply REPLY125;
 extern struct reply REPLY150;
+extern struct reply REPLY215;
 extern struct reply REPLY220;
+extern struct reply REPLY221;
 extern struct reply REPLY230;
 extern struct reply REPLY331;
 extern struct reply REPLY421;

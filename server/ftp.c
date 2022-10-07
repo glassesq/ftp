@@ -203,6 +203,22 @@ int parseRawRequest(char* raw, struct request* req) {
     req->type = FTP_RETR;
     strcpy(req->params, raw + 4);
     return 1;
+  } else if (startswith(raw, "SYST")) {
+    req->type = FTP_SYST;
+    strcpy(req->params, raw + 4);
+    return 1;
+  } else if (startswith(raw, "TYPE")) {
+    req->type = FTP_TYPE;
+    strcpy(req->params, raw + 4);
+    return 1;
+  } else if (startswith(raw, "QUIT")) {
+    req->type = FTP_QUIT;
+    strcpy(req->params, raw + 4);
+    return 1;
+  } else if (startswith(raw, "ABOR")) {
+    req->type = FTP_ABOR;
+    strcpy(req->params, raw + 4);
+    return 1;
   }
   return E_NOT_UNDERSTAND;
 }
@@ -337,6 +353,24 @@ void runFTP(int ftp_socket, struct conn_info* info) {
             return;
           break;
         }
+        case FTP_TYPE: {
+          if ((ret = handleType(ftp_socket, req, info)) == E_SOCKET_WRONG)
+            return;
+          break;
+        }
+        case FTP_SYST: {
+          if ((ret = handleSyst(ftp_socket, req, info)) == E_SOCKET_WRONG)
+            return;
+          break;
+        }
+        case FTP_QUIT: {
+          handleQuit(ftp_socket, req, info);
+          return;
+        }
+        case FTP_ABOR: {
+          handleAbor(ftp_socket, req, info);
+          return;
+        }
         default: {
           sendReply(ftp_socket, REPLY500);
         }
@@ -403,16 +437,17 @@ int handleLogin(int sock, struct request req, struct conn_info* info) {
       return E_SOCKET_WRONG;
     }
   } else {
-    info->id = ret;
+    info->id = 1;  // TODO: user id
   }
   return 1;
 }
 
 int handlePasv(int ftp_socket, struct request req, struct conn_info* info) {
+  int ret;
+  if ((ret = checkLogin(ftp_socket, info) < 0)) return ret;
   // TODO: check if there is already in some mode.
   // TODO: clear the mode information and close the data thread.
 
-  int ret;
   int dserver_socket = newBindSocket(-1, config.ip);
   if (dserver_socket < 0) {
     loge("error when try to make a new socket");
@@ -496,6 +531,7 @@ int handlePasv(int ftp_socket, struct request req, struct conn_info* info) {
 
 int handleRetr(int ftp_socket, struct request req, struct conn_info* info) {
   int ret;
+  if ((ret = checkLogin(ftp_socket, info) < 0)) return ret;
 
   if (info->mode != FTP_M_PASV_ACCEPT) {
     logw("tcp connection not prepared");
@@ -562,6 +598,73 @@ int handleRetr(int ftp_socket, struct request req, struct conn_info* info) {
   info->mode = FTP_M_EMPTY;
   shutdown(d_socket, SHUT_RDWR);
 
+  return 1;
+}
+
+int handleSyst(int ftp_socket, struct request req, struct conn_info* info) {
+  int ret;
+  if ((ret = checkLogin(ftp_socket, info) < 0)) return ret;
+
+  ret = sendReply(ftp_socket, REPLY215);
+  if (ret < 0) {
+    loge(formatstr("socket %d close unexpectely", ftp_socket));
+    return E_SOCKET_WRONG;
+  }
+  logi(formatstr("socket %d: SYST received", ftp_socket));
+  return 1;
+}
+
+int handleQuit(int ftp_socket, struct request req, struct conn_info* info) {
+  int ret = sendReply(ftp_socket, REPLY221);
+  if (ret < 0) {
+    loge(formatstr("socket %d close unexpectely", ftp_socket));
+    return E_SOCKET_WRONG;
+  }
+  logi(formatstr("socket %d: QUIT received", ftp_socket));
+  return 1;
+}
+
+int handleAbor(int ftp_socket, struct request req, struct conn_info* info) {
+  handleQuit(ftp_socket, req, info);
+}
+
+int handleType(int ftp_socket, struct request req, struct conn_info* info) {
+  int ret;
+  if ((ret = checkLogin(ftp_socket, info) < 0)) return ret;
+
+  if (req.params[0] == ' ') removeFirstSec(req.params, ' ');
+
+  if (req.params[0] != 'I') {
+    ret = sendReply(ftp_socket, REPLY500);
+    if (ret < 0) {
+      loge(formatstr("socket %d close unexpectely", ftp_socket));
+      return E_SOCKET_WRONG;
+    }
+    return E_NOT_UNDERSTAND;
+  }
+
+  struct reply r;
+  genReply(&r, 200, "Type set to I.\r\n");
+
+  ret = sendReply(ftp_socket, r);
+  if (ret < 0) {
+    loge(formatstr("socket %d close unexpectely", ftp_socket));
+    return E_SOCKET_WRONG;
+  }
+  logi(formatstr("socket %d: type set to %s", ftp_socket, req.params));
+  return 1;
+}
+
+int checkLogin(int ftp_socket, struct conn_info* info) {
+  int ret;
+  if (info->id < 0) {
+    ret = sendReply(ftp_socket, REPLY530);
+    if (ret < 0) {
+      loge(formatstr("socket %d close unexpectely", ftp_socket));
+      return E_SOCKET_WRONG;
+    }
+    return E_NO_ACCESS;
+  }
   return 1;
 }
 
