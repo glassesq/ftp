@@ -97,6 +97,14 @@ void removeFirstChar(char* src, char target) {
 }
 
 int startswith(char* raw, char* target) {
-  if( raw == NULL || target == NULL) return 0;
+  if (raw == NULL || target == NULL) return 0;
   return strncmp(raw, target, strlen(target)) == 0;
+}
+
+void replaceChar(char* raw, char src, char target) {
+  if (raw == NULL) return;
+  int len = strlen(raw);
+  for (int i = 0; i < len; i++) {
+    if (raw[i] == src) raw[i] = target;
+  }
 }

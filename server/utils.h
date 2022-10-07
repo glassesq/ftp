@@ -11,6 +11,9 @@
 
 extern char formatb[BUFFER_SIZE];
 
+/* replace src with target in raw */
+void replaceChar(char* raw, char src, char target);
+
 /* remove the first [target]* from raw */
 void removeFirstSec(char* raw, char target);
 

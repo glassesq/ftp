@@ -129,7 +129,7 @@ int readOneRequest(int sock, char* result) {
     if (result[count] == '\r')
       former_r = 1;
     else
-      former_r = 1;
+      former_r = 0;
 
     // TODO: illegal character check
     if (result[count] == '\0') continue;
@@ -223,12 +223,28 @@ int writeRaw(int sock, char* raw) {
   return 1;
 }
 
+int writeBinary(int sock, char* raw, int len) {
+  if (raw == NULL) return E_NULL;
+  int n = write(sock, raw, len);
+  if (n < 0) {
+    logd("write go wrong, mostly beacuse the socket is closed");
+    return E_WRITE_WRONG;
+  }
+  if (n < len) {
+    logd("write incomplete");
+    return E_WRITE_INCOMP;
+  }
+  return 1;
+}
+
 int writeFile(int sock, char* path) {
   char buffer[BUFFER_SIZE + 1];
+  logd(path);
   // write it to socket
   // stop when accident happens
-  int fd = open(path, O_RDONLY);
-  if (fd < 0) {
+  // int fd = open(path, O_RDONLY);
+  FILE* f = fopen(path, "rb");
+  if (f == NULL) {
     loge(formatstr("cannot open the target file [%s]", path));
     return E_FILE_SYS;
   }
@@ -237,15 +253,14 @@ int writeFile(int sock, char* path) {
   int count = 0;  // TODO: count should be long?
   // read from file trunk by trunk.
   while (1) {
-    int n = read(fd, buffer, BUFFER_SIZE);
+    int n = fread(buffer, 1, BUFFER_SIZE, f);
     if (n < 0) {
       loge(formatstr("cannot read the target file", path));
       return E_FILE_SYS;
     }
     if (n > 0) {
       count += n;
-      buffer[n] = '\0';  // null-terminated
-      ret = writeRaw(sock, buffer);
+      ret = writeBinary(sock, buffer, n);
       if (ret < 0) {
         loge(formatstr("cannot write to the data socket %d", sock));
         return E_DSOCKET;
@@ -448,9 +463,11 @@ int handlePasv(int ftp_socket, struct request req, struct conn_info* info) {
   pthread_detach(ret);
 
   char result[BUFFER_SIZE];
+  char* ip = inet_ntoa(addr.sin_addr);
+  replaceChar(ip, '.', ',');
   struct reply r;
-  ret = snprintf(result, BUFFER_SIZE, "=%s.%d.%d", inet_ntoa(addr.sin_addr),
-                 port / 256, port % 256);
+  ret = snprintf(result, BUFFER_SIZE, "=%s,%d,%d\r\n", ip, port / 256,
+                 port % 256);
 
   if (ret < 0 || ret + 1 > BUFFER_SIZE) {
     logw("failed to gen a message send back");
