@@ -24,7 +24,8 @@ enum FTPMode {
   FTP_M_ERROR = -1,
   FTP_M_PASV_LISTEN,  // now listen to tcp
   FTP_M_PASV_ACCEPT,  // accept tcp, waiting command
-  FTP_M_EMPTY,        // empty
+  FTP_M_PORT_WAIT,
+  FTP_M_EMPTY,  // empty
 };
 
 enum FTPType {
@@ -32,6 +33,7 @@ enum FTPType {
   FTP_USER = 0,
   FTP_PASS,
   FTP_PASV,
+  FTP_PORT,
   FTP_RETR,
   FTP_QUIT,
   FTP_ABOR,
@@ -43,6 +45,8 @@ enum FTPType {
 struct conn_info {
   int id;
   enum FTPMode mode;  // TODO: lock required
+  in_addr_t pomode_ip;
+  in_port_t pomode_port;
   int dserver_socket;
   int d_socket;
   pthread_t d_thread;
@@ -128,8 +132,20 @@ int newBindSocket(int port, char* address);
 /* handle unexpectely pass command */
 int handleUnexpPass(int const, struct request req, struct conn_info* info);
 
+/* handle unexpectely pass command */
+int handlePort(int const, struct request req, struct conn_info* info);
+
 /* check if it has logged in. */
 int checkLogin(int ftp_socket, struct conn_info* info);
+
+/* parse a <host-port> x,x,x,x,a,b str */
+int parseHostPort(char* raw, in_addr_t* host, in_port_t* port);
+
+/* clear mode already have */
+int clearMode(struct conn_info* info);
+
+/* prepare socket for PORT mode */
+int preparePortSocket(int ftp_socket, struct conn_info* info);
 
 /* good bye */
 void bye(void);
@@ -140,7 +156,7 @@ void* syncRun(void* socket_ptr);
 /* sync run FTP data procedure */
 void* syncData(void* info_ptr);
 
-/* clear data connection, not included the ftp_socket itself */
-void clearConn(struct conn_info* info);
+/* clear data connection, included the ftp_socket itself */
+void clearConn(int ftp_socket, struct conn_info* info);
 
 #endif

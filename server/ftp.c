@@ -195,6 +195,10 @@ int parseRawRequest(char* raw, struct request* req) {
     req->type = FTP_PASS;
     strcpy(req->params, raw + 4);
     return 1;
+  } else if (startswith(raw, "PORT")) {
+    req->type = FTP_PORT;
+    strcpy(req->params, raw + 4);
+    return 1;
   } else if (startswith(raw, "PASV")) {
     req->type = FTP_PASV;
     strcpy(req->params, raw + 4);
@@ -294,12 +298,11 @@ int writeFile(int sock, char* path) {
 
 int greeting(int sock) { return sendReply(sock, REPLY220); }
 
-void clearConn(struct conn_info* info) {
+void clearConn(int ftp_socket, struct conn_info* info) {
   // TODO: gracefully maybe?
-  pthread_cancel(info->d_thread);
-  if (info->d_socket > 0) shutdown(info->d_socket, SHUT_RDWR);
-  if (info->dserver_socket > 0) shutdown(info->dserver_socket, SHUT_RDWR);
-  info->mode = FTP_M_EMPTY;
+  clearMode(info);
+  shutdown(ftp_socket, SHUT_RDWR);
+  // TODO: close needed here?
 }
 
 void runFTP(int ftp_socket, struct conn_info* info) {
@@ -343,6 +346,11 @@ void runFTP(int ftp_socket, struct conn_info* info) {
             return;
           break;
         }
+        case FTP_PORT: {
+          if ((ret = handlePort(ftp_socket, req, info)) == E_SOCKET_WRONG)
+            return;
+          break;
+        }
         case FTP_PASV: {
           if ((ret = handlePasv(ftp_socket, req, info)) == E_SOCKET_WRONG)
             return;
@@ -381,6 +389,7 @@ void runFTP(int ftp_socket, struct conn_info* info) {
 
 int handleUnexpPass(int ftp_socket, struct request req,
                     struct conn_info* info) {
+  clearMode(info);
   int ret = sendReply(ftp_socket, REPLY503);
   if (ret < 0) {
     loge(formatstr("socket %d close unexpectely", ftp_socket));
@@ -392,6 +401,7 @@ int handleUnexpPass(int ftp_socket, struct request req,
 }
 
 int handleLogin(int sock, struct request req, struct conn_info* info) {
+  clearMode(info);
   if (info->id >= 0) {
     logw("try to log in repeatedly");
     // TODO: what happened here?
@@ -442,11 +452,38 @@ int handleLogin(int sock, struct request req, struct conn_info* info) {
   return 1;
 }
 
+int clearMode(struct conn_info* info) {
+  if (info->mode == FTP_M_EMPTY) return 1;
+  if (info->mode == FTP_M_ERROR) {
+    info->mode = FTP_M_EMPTY;
+    return E_ALL;
+  }
+  if (info->mode == FTP_M_PASV_LISTEN) {
+    info->mode = FTP_M_EMPTY;
+    pthread_cancel(info->d_thread);
+    shutdown(info->dserver_socket, SHUT_RDWR);
+    close(info->dserver_socket);
+    return 1;
+  }
+  if (info->mode == FTP_M_PASV_ACCEPT) {
+    info->mode = FTP_M_EMPTY;
+    pthread_cancel(info->d_thread);
+    shutdown(info->d_socket, SHUT_RDWR);
+    close(info->d_socket);
+    return 1;
+  }
+  if (info->mode == FTP_M_PORT_WAIT) {
+    info->mode = FTP_M_EMPTY;
+    return 1;
+  }
+  return E_NOT_UNDERSTAND;
+}
+
 int handlePasv(int ftp_socket, struct request req, struct conn_info* info) {
+  clearMode(info);
+
   int ret;
   if ((ret = checkLogin(ftp_socket, info) < 0)) return ret;
-  // TODO: check if there is already in some mode.
-  // TODO: clear the mode information and close the data thread.
 
   int dserver_socket = newBindSocket(-1, config.ip);
   if (dserver_socket < 0) {
@@ -529,13 +566,95 @@ int handlePasv(int ftp_socket, struct request req, struct conn_info* info) {
   return 1;
 }
 
+int handlePort(int ftp_socket, struct request req, struct conn_info* info) {
+  clearMode(info);
+
+  int ret;
+  if ((ret = checkLogin(ftp_socket, info) < 0)) return ret;
+
+  ret = parseHostPort(req.params, &(info->pomode_ip), &(info->pomode_port));
+
+  if (ret < 0) {
+    loge(formatstr("socket %d: PORT parameter illegal.", ftp_socket));
+    ret = sendReply(ftp_socket, REPLY500);
+    if (ret < 0) {
+      loge(formatstr("socket %d close unexpectely", ftp_socket));
+      return E_START_SOCKET;
+    }
+    return E_MODE;
+  }
+  struct in_addr addr = {.s_addr = info->pomode_ip};
+  logi(formatstr(
+      "PORT mode: socket %d is now prepared to connect ip[%s] port[%d]",
+      ftp_socket, inet_ntoa(addr), ntohs(info->pomode_port)));
+
+  struct reply r;
+  genReply(&r, 200, "PORT command successful\r\n");
+  ret = sendReply(ftp_socket, r);
+
+  if (ret < 0) {
+    loge(formatstr("socket %d close unexpectely", ftp_socket));
+    return E_START_SOCKET;
+  }
+
+  info->mode = FTP_M_PORT_WAIT;
+
+  logi("PORT mode set ok");
+  return 1;
+}
+
+int parseHostPort(char* raw, in_addr_t* host, in_port_t* port) {
+  if (raw == NULL) return E_NULL;
+  replaceChar(raw, ',', '.');
+  int len = strlen(raw);
+  int cnt = 0, point = 0;
+  for (cnt = 0; cnt < len; cnt++) {
+    if (raw[cnt] == '.') {
+      point++;
+      if (point == 4) {
+        raw[cnt] = '\0';
+        break;
+      }
+    }
+  }
+  if (point != 4) {
+    return E_NOT_UNDERSTAND;
+  }
+  *host = inet_addr(raw);
+
+  if (*host == (in_addr_t)(-1)) {
+    return E_NOT_UNDERSTAND;
+  }
+  int num1 = -1, num2 = -1;
+
+  ++cnt;
+  int st = cnt, ret;
+  for (; cnt < len; cnt++) {
+    if (raw[cnt] == '.') {
+      raw[cnt] = '\0';
+      if (!(ret = str2int(raw + st, &num1))) return E_NOT_UNDERSTAND;
+      break;
+    }
+  }
+
+  ++cnt;
+  st = cnt;
+
+  if (!(ret = str2int(raw + st, &num2))) return E_NOT_UNDERSTAND;
+
+  if (num1 < 0 || num2 < 0) return E_NOT_UNDERSTAND;
+
+  *port = htons(num1 * 256 + num2);
+
+  return 1;
+}
+
 int handleRetr(int ftp_socket, struct request req, struct conn_info* info) {
   int ret;
   if ((ret = checkLogin(ftp_socket, info) < 0)) return ret;
 
-  if (info->mode != FTP_M_PASV_ACCEPT) {
+  if (info->mode != FTP_M_PASV_ACCEPT && info->mode != FTP_M_PORT_WAIT) {
     logw("tcp connection not prepared");
-    // TODO: port mode accept
     ret = sendReply(ftp_socket, REPLY425);
     if (ret < 0) {
       loge(formatstr("socket %d close unexpectely", ftp_socket));
@@ -578,6 +697,20 @@ int handleRetr(int ftp_socket, struct request req, struct conn_info* info) {
     return E_SOCKET_WRONG;
   }
 
+  if (info->mode == FTP_M_PORT_WAIT) {
+    logd("port mode: try to prepare socket");
+    ret = preparePortSocket(ftp_socket, info);
+    if (ret < 0) {
+      ret = sendReply(ftp_socket, REPLY425);
+      if (ret < 0) {
+        loge(formatstr("socket %d close unexpectely", ftp_socket));
+        return E_SOCKET_WRONG;
+      }
+      return E_DSOCKET;
+    }
+    logd(formatstr("PORT mode: d_socket %d prepared", info->d_socket));
+  }
+
   int d_socket = info->d_socket;
 
   // In current thread, transfer the file to d_socket
@@ -601,7 +734,42 @@ int handleRetr(int ftp_socket, struct request req, struct conn_info* info) {
   return 1;
 }
 
+int preparePortSocket(int ftp_socket, struct conn_info* info) {
+  struct sockaddr_in addr;
+  addr.sin_family = AF_INET;
+  addr.sin_port = info->pomode_port;
+  addr.sin_addr.s_addr = info->pomode_ip;
+  int sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+  int ret;
+  if (sock < 0) {
+    ret = sendReply(ftp_socket, REPLY500);  // TODO
+    if (ret < 0) {
+      loge(formatstr("socket %d close unexpectely", ftp_socket));
+      return E_SOCKET_WRONG;
+    }
+    loge("failed to start socket");
+    return E_START_SOCKET;
+  }
+
+  ret = connect(sock, (struct sockaddr*)&addr, sizeof(addr));
+  if (ret < 0) {
+    ret = sendReply(ftp_socket, REPLY500);  // TODO
+    if (ret < 0) {
+      loge(formatstr("socket %d close unexpectely", ftp_socket));
+      return E_SOCKET_WRONG;
+    }
+    loge("failed to connect socket");
+    return E_START_SOCKET;
+  }
+
+  info->d_socket = sock;
+
+  return 1;
+}
+
 int handleSyst(int ftp_socket, struct request req, struct conn_info* info) {
+  clearMode(info);
+
   int ret;
   if ((ret = checkLogin(ftp_socket, info) < 0)) return ret;
 
@@ -673,8 +841,7 @@ void* syncRun(void* socket_ptr) {
   logi(formatstr("ftp_socket accept. This is now a ftp_socket %d", ftp_socket));
   struct conn_info info;
   runFTP(ftp_socket, &info);
-  clearConn(&info);
-  shutdown(ftp_socket, SHUT_RDWR);
+  clearConn(ftp_socket, &info);
   int id = socket2thread(ftp_socket);
   sk2th[id] = -1;
   logi(formatstr("ftp_socket %d finish and release threads pool %d", ftp_socket,

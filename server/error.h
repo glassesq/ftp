@@ -44,6 +44,7 @@ enum ERROR {
   E_NO_ACCESS,
   E_FILE_SYS,
   E_MSG_FAIL,  // fail to gen a right msg
+  E_MODE,
 };
 
 /* write log to LOG_FILE */
