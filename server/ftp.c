@@ -13,6 +13,7 @@ void startServer(int argc, char* argv[]) {
   // TODO: wrap chdir
   chdir(config.root);
   int ret = startListen(config.port, config.max_connect);
+  if (ret < 0) loge("listen failed");
 }
 
 void bye(void) { logi("The server is down. Good Bye!"); }
@@ -143,12 +144,11 @@ int readOneRequest(int sock, char* result) {
 }
 
 int sendReply(int sock, struct reply r) {
-  int count = 0, former_r = 0;
   char raw[BUFFER_SIZE * 4];
 
   /* gen reply raw */
   int newline = 1, lastd = -1, cnt = 0;
-  for (int i = 0; i < strlen(r.msg); i++) {
+  for (int i = 0; i < (int)strlen(r.msg); i++) {
     if (newline) {
       raw[cnt] = (char)(r.code / 100 + '0');
       raw[cnt + 1] = (char)((r.code % 100) / 10 + '0');
@@ -223,7 +223,12 @@ int parseRawRequest(char* raw, struct request* req) {
     req->type = FTP_ABOR;
     strcpy(req->params, raw + 4);
     return 1;
+  } else if (startswith(raw, "LIST")) {
+    req->type = FTP_LIST;
+    strcpy(req->params, raw + 4);
+    return 1;
   }
+
   return E_NOT_UNDERSTAND;
 }
 
@@ -274,6 +279,7 @@ int writeFile(int sock, char* path) {
   // read from file trunk by trunk.
   while (1) {
     int n = fread(buffer, 1, BUFFER_SIZE, f);
+    // TODO: using preferred I/O block size.
     if (n < 0) {
       loge(formatstr("cannot read the target file", path));
       return E_FILE_SYS;
@@ -323,7 +329,7 @@ void runFTP(int ftp_socket, struct conn_info* info) {
   char result[BUFFER_SIZE];
   struct request req;
   while (1) {
-    int ret = readOneRequest(ftp_socket, result);
+    ret = readOneRequest(ftp_socket, result);
     if (ret < 0) {
       loge(formatstr("socket %d close unexpectely", ftp_socket));
       return;
@@ -379,6 +385,12 @@ void runFTP(int ftp_socket, struct conn_info* info) {
           handleAbor(ftp_socket, req, info);
           return;
         }
+        case FTP_LIST: {
+          if ((ret = handleList(ftp_socket, req, info)) == E_SOCKET_WRONG)
+            return;
+          break;
+        }
+
         default: {
           sendReply(ftp_socket, REPLY500);
         }
@@ -480,6 +492,7 @@ int clearMode(struct conn_info* info) {
 }
 
 int handlePasv(int ftp_socket, struct request req, struct conn_info* info) {
+  if (req.type != FTP_PASV) return E_NOT_UNDERSTAND;
   clearMode(info);
 
   int ret;
@@ -706,7 +719,7 @@ int handleRetr(int ftp_socket, struct request req, struct conn_info* info) {
         loge(formatstr("socket %d close unexpectely", ftp_socket));
         return E_SOCKET_WRONG;
       }
-      return E_DSOCKET;
+      return E_DSOCKET;  // TODO: 426 connection closed. transfer aborted.
     }
     logd(formatstr("PORT mode: d_socket %d prepared", info->d_socket));
   }
@@ -727,6 +740,86 @@ int handleRetr(int ftp_socket, struct request req, struct conn_info* info) {
     loge(formatstr("socket %d close unexpectely", ftp_socket));
     return E_SOCKET_WRONG;
   }
+
+  info->mode = FTP_M_EMPTY;
+  shutdown(d_socket, SHUT_RDWR);
+
+  return 1;
+}
+
+int handleList(int ftp_socket, struct request req, struct conn_info* info) {
+  if (req.type != FTP_LIST) return E_NOT_UNDERSTAND;
+  int ret;
+  if ((ret = checkLogin(ftp_socket, info) < 0)) return ret;
+
+  if (info->mode != FTP_M_PASV_ACCEPT && info->mode != FTP_M_PORT_WAIT) {
+    logw("tcp connection not prepared");
+    ret = sendReply(ftp_socket, REPLY425);
+    if (ret < 0) {
+      loge(formatstr("socket %d close unexpectely", ftp_socket));
+      return E_SOCKET_WRONG;
+    }
+    return E_DSOCKET;
+  }
+  /* mode check ok, tcp connection is established */
+
+  logd(formatstr("mode checked for RETR, we are about to LIST [%s]",
+                 config.root));
+
+  // TODO: hello?
+
+  ret = checkWorkDir(info);
+  if (ret < 0) {
+    struct reply r;
+    char msg[BUFFER_SIZE * 2];
+    snprintf(msg, BUFFER_SIZE * 2,
+             "Requested file action not taken.\r\nOriginal working dir go "
+             "wrong.\r\nWe switched it to [%s].\r\n",
+             info->work_dir);
+    genReply(&r, 425, msg);
+    if ((ret = sendReply(ftp_socket, r)) < 0) {
+      return E_SOCKET_WRONG;
+    }
+    chdir(config.root);
+    return E_WORK_DIR;
+  }
+
+  if ((ret = sendReply(ftp_socket, REPLY150D)) < 0) {
+    loge(formatstr("socket %d close unexpectely", ftp_socket));
+    return E_SOCKET_WRONG;
+  }
+
+  if (info->mode == FTP_M_PORT_WAIT) {
+    logd("PORT mode: try to prepare socket");
+    ret = preparePortSocket(ftp_socket, info);
+    if (ret < 0) {
+      ret = sendReply(ftp_socket, REPLY425);
+      if (ret < 0) {
+        loge(formatstr("socket %d close unexpectely", ftp_socket));
+        return E_SOCKET_WRONG;
+      }
+      return E_DSOCKET;
+    }
+    logd(formatstr("PORT mode: d_socket %d prepared", info->d_socket));
+  }
+
+  int d_socket = info->d_socket;
+
+  // In current thread, transfer the list msg to d_socket
+  ret = writeListMessage(info);
+
+  // everything is done, then send ftp_socket the reply
+  if (ret != E_SOCKET_WRONG) {
+    if (ret < 0)
+      ret = sendReply(ftp_socket, REPLY500);
+    else
+      ret = sendReply(ftp_socket, REPLY226);
+  }
+  if (ret < 0) {
+    loge(formatstr("socket %d close unexpectely", ftp_socket));
+    return E_SOCKET_WRONG;
+  }
+  logi(formatstr("socket %d LIST transfer ok.", ftp_socket));
 
   info->mode = FTP_M_EMPTY;
   shutdown(d_socket, SHUT_RDWR);
@@ -768,6 +861,7 @@ int preparePortSocket(int ftp_socket, struct conn_info* info) {
 }
 
 int handleSyst(int ftp_socket, struct request req, struct conn_info* info) {
+  if (req.type != FTP_SYST) return E_NOT_UNDERSTAND;
   clearMode(info);
 
   int ret;
@@ -788,12 +882,13 @@ int handleQuit(int ftp_socket, struct request req, struct conn_info* info) {
     loge(formatstr("socket %d close unexpectely", ftp_socket));
     return E_SOCKET_WRONG;
   }
-  logi(formatstr("socket %d: QUIT received", ftp_socket));
+  logi(formatstr("socket %d: QUIT received with [%s]", ftp_socket, req.params));
+  logi(formatstr("socket %d: current user %d", ftp_socket, info->id));
   return 1;
 }
 
 int handleAbor(int ftp_socket, struct request req, struct conn_info* info) {
-  handleQuit(ftp_socket, req, info);
+  return handleQuit(ftp_socket, req, info);
 }
 
 int handleType(int ftp_socket, struct request req, struct conn_info* info) {
@@ -833,6 +928,90 @@ int checkLogin(int ftp_socket, struct conn_info* info) {
     }
     return E_NO_ACCESS;
   }
+  return 1;
+}
+
+int checkWorkDir(struct conn_info* info) {
+  if (checkDirectory(info->work_dir) <= 0) {
+    logw(formatstr("working dir check fail for [%s], switch to [%s]",
+                   info->work_dir, config.root));
+    strncpy(info->work_dir, config.root, BUFFER_SIZE);
+    return E_NOT_EXIST;
+  }
+  return 1;
+}
+
+int writeListMessage(struct conn_info* info) {
+  if (info == NULL) return E_NULL;
+
+  DIR* dir;
+  struct dirent* sub;
+  struct stat buffer;
+  dir = opendir(info->work_dir);
+  unsigned int maxlink = 1, user_len = 1, group_len = 1;
+  if (dir == NULL) return E_NOT_DIR;
+
+  while ((sub = readdir(dir)) != NULL) {
+    if (strcmp(sub->d_name, ".") == 0 || strcmp(sub->d_name, "..") == 0)
+      continue;
+    char* path = realpath(sub->d_name, NULL);
+    if (path == NULL) continue;
+
+    stat(path, &buffer);
+
+    struct passwd* pwd = getpwuid(buffer.st_uid);
+    struct group* gp = getgrgid(buffer.st_gid);
+    if (buffer.st_nlink > maxlink) maxlink = buffer.st_nlink;
+    if (strlen(pwd->pw_name) > user_len) user_len = strlen(pwd->pw_name);
+    if (strlen(gp->gr_name) > group_len) group_len = strlen(pwd->pw_name);
+  }
+
+  int linkd = (int)(log10(maxlink) + 1);
+  int d_socket = info->d_socket;
+
+  dir = opendir(info->work_dir);
+  if (dir == NULL) return E_NOT_DIR;
+  while ((sub = readdir(dir)) != NULL) {
+    if (strcmp(sub->d_name, ".") == 0 || strcmp(sub->d_name, "..") == 0)
+      continue;
+    char* path = realpath(sub->d_name, NULL);
+    if (path == NULL) continue;
+
+    stat(path, &buffer);
+
+    char type = '-';
+    if (S_ISBLK(buffer.st_mode)) type = 'b';
+    if (S_ISCHR(buffer.st_mode)) type = 'c';
+    if (S_ISDIR(buffer.st_mode)) type = 'd';
+    if (S_ISLNK(buffer.st_mode)) type = 'l';
+    if (S_ISFIFO(buffer.st_mode)) type = 'p';
+    if (S_ISSOCK(buffer.st_mode)) type = 's';
+
+    char permission[10] = "---------";
+
+    if (S_IRUSR & buffer.st_mode) permission[0] = 'r';
+    if (S_IWUSR & buffer.st_mode) permission[1] = 'w';
+    if (S_IXUSR & buffer.st_mode) permission[2] = 'x';
+    if (S_IRGRP & buffer.st_mode) permission[3] = 'r';
+    if (S_IWGRP & buffer.st_mode) permission[4] = 'w';
+    if (S_IXGRP & buffer.st_mode) permission[5] = 'x';
+    if (S_IROTH & buffer.st_mode) permission[6] = 'r';
+    if (S_IWOTH & buffer.st_mode) permission[7] = 'w';
+    if (S_IXOTH & buffer.st_mode) permission[8] = 'x';
+
+    // TODO: s / S
+
+    struct passwd* pwd = getpwuid(buffer.st_uid);
+    struct group* gp = getgrgid(buffer.st_gid);
+    char msg[BUFFER_SIZE + 1];
+    snprintf(msg, BUFFER_SIZE, "%c%s %*d %-*s %-*s %13d %.12s %.4s %s\r\n",
+             type, permission, linkd, (int)buffer.st_nlink, user_len,
+             pwd->pw_name, group_len, gp->gr_name, (int)buffer.st_size,
+             ctime(&buffer.st_mtime) + 4, ctime(&buffer.st_mtime) + 20,
+             sub->d_name);
+    writeRaw(d_socket, msg);
+  }
+  closedir(dir);
   return 1;
 }
 

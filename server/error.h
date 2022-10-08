@@ -43,6 +43,7 @@ enum ERROR {
   E_THREAD,
   E_NO_ACCESS,
   E_FILE_SYS,
+  E_WORK_DIR,
   E_MSG_FAIL,  // fail to gen a right msg
   E_MODE,
 };

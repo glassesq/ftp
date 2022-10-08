@@ -126,6 +126,15 @@ int handleQuit(int ftp_socket, struct request req, struct conn_info* info);
 /* handle ABOR and quit */
 int handleAbor(int ftp_socket, struct request req, struct conn_info* info);
 
+/* handle ABOR and quit */
+int handleList(int ftp_socket, struct request req, struct conn_info* info);
+
+/* check current working dir is valid and change it to default if invalid */
+int checkWorkDir(struct conn_info* info);
+
+/* gen LIST path message to [msg] */
+int writeListMessage(struct conn_info* info);
+
 /* new socket and bind to port */
 int newBindSocket(int port, char* address);
 

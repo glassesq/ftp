@@ -7,6 +7,10 @@ struct reply REPLY150 = {
     .code = 150,
     .msg = "File status okay\r\nAbout to open data connection.\r\n"};
 
+struct reply REPLY150D = {
+    .code = 150,
+    .msg = "Directory info okay\r\nAbout to open data connection.\r\n"};
+
 struct reply REPLY215 = {.code = 215, .msg = "UNIX Type: L8\r\n"};
 
 struct reply REPLY220 = {.code = 220,
