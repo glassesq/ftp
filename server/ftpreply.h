@@ -23,11 +23,15 @@ extern struct reply REPLY215;
 extern struct reply REPLY220;
 extern struct reply REPLY221;
 extern struct reply REPLY230;
+extern struct reply REPLY250;
 extern struct reply REPLY331;
 extern struct reply REPLY421;
 extern struct reply REPLY500;
+extern struct reply REPLY501;
 extern struct reply REPLY503;
 extern struct reply REPLY530;
+extern struct reply REPLY550;
+extern struct reply REPLY550D;
 extern struct reply REPLY550E; /* not exist */
 extern struct reply REPLY550P; /* no permission */
 extern struct reply REPLY425;

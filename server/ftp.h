@@ -2,6 +2,7 @@
 #define FTP_H
 
 #include <arpa/inet.h>
+#include <errno.h>
 #include <ctype.h>
 #include <fcntl.h>
 #include <netinet/in.h>
@@ -40,6 +41,10 @@ enum FTPType {
   FTP_LIST,
   FTP_TYPE,
   FTP_SYST,
+  FTP_MKD,
+  FTP_CWD,
+  FTP_RMD,
+  FTP_PWD,
 };
 
 struct conn_info {
@@ -132,6 +137,10 @@ int handleList(int ftp_socket, struct request req, struct conn_info* info);
 /* check current working dir is valid and change it to default if invalid */
 int checkWorkDir(struct conn_info* info);
 
+
+/* check current working dir is valid and change it to default if invalid, send reply to ftp_socket */
+int checkWorkDirAndReply(int ftp_socket, struct conn_info* info);
+
 /* gen LIST path message to [msg] */
 int writeListMessage(struct conn_info* info);
 
@@ -139,10 +148,22 @@ int writeListMessage(struct conn_info* info);
 int newBindSocket(int port, char* address);
 
 /* handle unexpectely pass command */
-int handleUnexpPass(int const, struct request req, struct conn_info* info);
+int handleUnexpPass(int ftp_socket, struct request req, struct conn_info* info);
 
 /* handle unexpectely pass command */
-int handlePort(int const, struct request req, struct conn_info* info);
+int handlePort(int ftp_socket, struct request req, struct conn_info* info);
+
+/* handle MKD command : mkdir */
+int handleMkd(int ftp_socket, struct request req, struct conn_info* info);
+
+/* handle CWD command : cd */
+int handleCwd(int ftp_socket, struct request req, struct conn_info* info);
+
+/* handle PKD command : pwd */
+int handlePwd(int ftp_socket, struct request req, struct conn_info* info);
+
+/* handle RMD command : remove dir */
+int handleRmd(int ftp_socket, struct request req, struct conn_info* info);
 
 /* check if it has logged in. */
 int checkLogin(int ftp_socket, struct conn_info* info);

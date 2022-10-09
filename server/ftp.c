@@ -227,8 +227,23 @@ int parseRawRequest(char* raw, struct request* req) {
     req->type = FTP_LIST;
     strcpy(req->params, raw + 4);
     return 1;
+  } else if (startswith(raw, "MKD")) {
+    req->type = FTP_MKD;
+    strcpy(req->params, raw + 3);
+    return 1;
+  } else if (startswith(raw, "CWD")) {
+    req->type = FTP_CWD;
+    strcpy(req->params, raw + 3);
+    return 1;
+  } else if (startswith(raw, "RMD")) {
+    req->type = FTP_RMD;
+    strcpy(req->params, raw + 3);
+    return 1;
+  } else if (startswith(raw, "PWD")) {
+    req->type = FTP_PWD;
+    strcpy(req->params, raw + 3);
+    return 1;
   }
-
   return E_NOT_UNDERSTAND;
 }
 
@@ -390,7 +405,26 @@ void runFTP(int ftp_socket, struct conn_info* info) {
             return;
           break;
         }
-
+        case FTP_MKD: {
+          if ((ret = handleMkd(ftp_socket, req, info)) == E_SOCKET_WRONG)
+            return;
+          break;
+        }
+        case FTP_CWD: {
+          if ((ret = handleCwd(ftp_socket, req, info)) == E_SOCKET_WRONG)
+            return;
+          break;
+        }
+        case FTP_PWD: {
+          if ((ret = handlePwd(ftp_socket, req, info)) == E_SOCKET_WRONG)
+            return;
+          break;
+        }
+        case FTP_RMD: {
+          if ((ret = handleRmd(ftp_socket, req, info)) == E_SOCKET_WRONG)
+            return;
+          break;
+        }
         default: {
           sendReply(ftp_socket, REPLY500);
         }
@@ -918,6 +952,204 @@ int handleType(int ftp_socket, struct request req, struct conn_info* info) {
   return 1;
 }
 
+int handleMkd(int ftp_socket, struct request req, struct conn_info* info) {
+  if (req.type != FTP_MKD) return E_NOT_UNDERSTAND;
+  clearMode(info);
+
+  int ret;
+  if ((ret = checkLogin(ftp_socket, info) < 0)) return ret;
+
+  ret = checkWorkDirAndReply(ftp_socket, info);
+  if (ret < 0) return ret;
+
+  int len = strlen(req.params);
+
+  if (len == 0 || len > 255 || realpath(req.params, NULL) != NULL) {
+    // TODO: check more details
+    loge("meet invalid parameter when create file");
+    if (len == 0 || len > 255)
+      ret = sendReply(ftp_socket, REPLY501);
+    else {
+      struct reply r;
+      char msg[BUFFER_SIZE];
+      snprintf(msg, BUFFER_SIZE,
+               "Requested action not taken.\r\n[%.255s] already exists\r\n",
+               req.params);
+      logd(msg);
+      genReply(&r, 550, msg);
+      ret = sendReply(ftp_socket, r);
+    }
+    if (ret < 0) {
+      loge(formatstr("socket %d close unexpectely", ftp_socket));
+      return E_SOCKET_WRONG;
+    }
+    return E_NOT_UNDERSTAND;
+  }
+
+  ret = mkdir(req.params, S_IRUSR | S_IWUSR | S_IXUSR | S_IRGRP | S_IXGRP |
+                              S_IROTH | S_IXOTH);
+
+  if (ret < 0)
+    ret = sendReply(ftp_socket, REPLY550);
+  else {
+    logi("dir make ok");
+    struct reply r;
+    char msg[BUFFER_SIZE + 20];
+    sprintf(msg, "\"%s\" created\r\n", req.params);
+    genReply(&r, 257, msg);
+    ret = sendReply(ftp_socket, r);
+  }
+  if (ret < 0) {
+    loge(formatstr("socket %d close unexpectely", ftp_socket));
+    return E_SOCKET_WRONG;
+  }
+  return 1;
+}
+
+int handleCwd(int ftp_socket, struct request req, struct conn_info* info) {
+  if (req.type != FTP_CWD) return E_NOT_UNDERSTAND;
+  clearMode(info);
+
+  int ret;
+  if ((ret = checkLogin(ftp_socket, info) < 0)) return ret;
+
+  ret = checkWorkDirAndReply(ftp_socket, info);
+  if (ret < 0) return ret;
+
+  if (checkDirectory(req.params) == 0) {
+    // TODO: check more details
+    loge("meet invalid parameter when CWD");
+    struct reply r;
+    char msg[BUFFER_SIZE];
+    snprintf(msg, BUFFER_SIZE,
+             "Requested action not taken.\r\n[%.255s] not a directory\r\n",
+             req.params);
+    logd(msg);
+    genReply(&r, 550, msg);
+    ret = sendReply(ftp_socket, r);
+    if (ret < 0) {
+      loge(formatstr("socket %d close unexpectely", ftp_socket));
+      return E_SOCKET_WRONG;
+    }
+    return E_NOT_UNDERSTAND;
+  }
+
+  if (!checkSub(req.params, config.root)) {
+    // 不能删除working dir以上的, 也不能删除config.root之外的
+    ret = sendReply(ftp_socket, REPLY550P);
+    if (ret < 0) {
+      loge(formatstr("socket %d close unexpectely", ftp_socket));
+      return E_SOCKET_WRONG;
+    }
+    return E_NO_ACCESS;
+  }
+
+  char* w = realpath(req.params, NULL);
+  strcpy(info->work_dir, w);
+  ret = chdir(w);
+
+  if (ret < 0)
+    ret = sendReply(ftp_socket, REPLY550);
+  else {
+    logi(formatstr("socket %d working dir change to [%s]", ftp_socket,
+                   info->work_dir));
+    ret = sendReply(ftp_socket, REPLY250);
+  }
+  if (ret < 0) {
+    loge(formatstr("socket %d close unexpectely", ftp_socket));
+    return E_SOCKET_WRONG;
+  }
+  return 1;
+}
+
+int handleRmd(int ftp_socket, struct request req, struct conn_info* info) {
+  if (req.type != FTP_RMD) return E_NOT_UNDERSTAND;
+  clearMode(info);
+
+  int ret;
+  if ((ret = checkLogin(ftp_socket, info) < 0)) return ret;
+
+  ret = checkWorkDirAndReply(ftp_socket, info);
+  if (ret < 0) return ret;
+
+  if (checkDirectory(req.params) == 0) {
+    loge("meet invalid parameter when create file");
+    struct reply r;
+    char msg[BUFFER_SIZE];
+    snprintf(msg, BUFFER_SIZE,
+             "Requested action not taken.\r\n[%.255s] not a directory\r\n",
+             req.params);
+    logd(msg);
+    genReply(&r, 550, msg);
+    ret = sendReply(ftp_socket, r);
+    if (ret < 0) {
+      loge(formatstr("socket %d close unexpectely", ftp_socket));
+      return E_SOCKET_WRONG;
+    }
+    return E_NOT_UNDERSTAND;
+  }
+
+  logi(formatstr("dir [%s] pass the first check", req.params));
+  logi(formatstr("%s %s", info->work_dir, config.root));
+
+  if (checkSub(info->work_dir, req.params) ||
+      !checkSub(req.params, config.root)) {
+    // 不能删除working dir以上的, 也不能删除config.root之外的
+    ret = sendReply(ftp_socket, REPLY550P);
+    if (ret < 0) {
+      loge(formatstr("socket %d close unexpectely", ftp_socket));
+      return E_SOCKET_WRONG;
+    }
+    return E_NO_ACCESS;
+  }
+
+  char* w = realpath(req.params, NULL);
+  ret = rmdir(w);
+  logi(formatstr("try to remove [%s]", w));
+
+  if (ret < 0) {
+    if (errno == EEXIST || errno == ENOTEMPTY)
+      ret = sendReply(ftp_socket, REPLY550D);
+    else
+      ret = sendReply(ftp_socket, REPLY550);
+  } else {
+    logi(formatstr("socket %d dir removed", ftp_socket));
+    ret = sendReply(ftp_socket, REPLY250);
+  }
+  if (ret < 0) {
+    loge(formatstr("socket %d close unexpectely", ftp_socket));
+    return E_SOCKET_WRONG;
+  }
+  return 1;
+}
+
+int handlePwd(int ftp_socket, struct request req, struct conn_info* info) {
+  if (req.type != FTP_PWD) return E_NOT_UNDERSTAND;
+  clearMode(info);
+
+  int ret;
+  if ((ret = checkLogin(ftp_socket, info) < 0)) return ret;
+
+  ret = checkWorkDirAndReply(ftp_socket, info);
+  if (ret < 0) return ret;
+
+  if (ret < 0)
+    ret = sendReply(ftp_socket, REPLY550);
+  else {
+    struct reply r;
+    char msg[BUFFER_SIZE];
+    snprintf(msg, BUFFER_SIZE, "%.4096s\r\n", info->work_dir);
+    genReply(&r, 257, msg);
+    ret = sendReply(ftp_socket, r);
+    logi(formatstr("socket %d pwd ok", ftp_socket));
+  }
+  if (ret < 0) {
+    loge(formatstr("socket %d close unexpectely", ftp_socket));
+    return E_SOCKET_WRONG;
+  }
+  return 1;
+}
+
 int checkLogin(int ftp_socket, struct conn_info* info) {
   int ret;
   if (info->id < 0) {
@@ -936,7 +1168,31 @@ int checkWorkDir(struct conn_info* info) {
     logw(formatstr("working dir check fail for [%s], switch to [%s]",
                    info->work_dir, config.root));
     strncpy(info->work_dir, config.root, BUFFER_SIZE);
+    chdir(config.root);
     return E_NOT_EXIST;
+  }
+  return 1;
+}
+
+int checkWorkDirAndReply(int ftp_socket, struct conn_info* info) {
+  int ret;
+  if (checkDirectory(info->work_dir) <= 0) {
+    logw(formatstr("working dir check fail for [%s], switch to [%s]",
+                   info->work_dir, config.root));
+    strncpy(info->work_dir, config.root, BUFFER_SIZE);
+    chdir(config.root);
+    struct reply r;
+    char msg[BUFFER_SIZE * 2];
+    snprintf(msg, BUFFER_SIZE * 2,
+             "Requested file action not taken.\r\nOriginal working dir go "
+             "wrong.\r\nWe switched it to [%s].\r\n",
+             info->work_dir);
+    genReply(&r, 425, msg);
+    if ((ret = sendReply(ftp_socket, r)) < 0) {
+      loge(formatstr("socket %d close unexpectely", ftp_socket));
+      return E_SOCKET_WRONG;
+    }
+    return E_WORK_DIR;
   }
   return 1;
 }

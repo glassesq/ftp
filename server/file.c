@@ -17,6 +17,8 @@ int checkFile(char* path) {
 }
 
 int checkSub(char* child, char* parent) {
-  if (startswith(child, parent)) return 1;
+  char* cr = realpath(child, NULL);
+  char* pr = realpath(parent, NULL);
+  if (startswith(cr, pr)) return 1;
   return 0;
 }

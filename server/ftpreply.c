@@ -31,15 +31,27 @@ struct reply REPLY331 = {.code = 331,
 struct reply REPLY230 = {.code = 230,
                          .msg = "WELCOME!\r\nguest login ok. Fantastic!\r\n"};
 
+struct reply REPLY250 = {.code = 250,
+                         .msg = "Requested file action okay, completed.\r\n"};
+
 struct reply REPLY500 = {.code = 500,
                          .msg = "Syntax error, command unrecognized.\r\n"};
+
+struct reply REPLY501 = {.code = 501,
+                         .msg = "Syntax error in parameters or arguments.\r\n"};
 
 struct reply REPLY503 = {.code = 503, .msg = "Bad sequence of commands.\r\n"};
 
 struct reply REPLY530 = {.code = 530, .msg = "Not logged in.\r\n"};
 
+struct reply REPLY550 = {.code = 550, .msg = "Requested action not taken.\r\n"};
+
 struct reply REPLY550E = {
     .code = 550, .msg = "Requested action not taken.\r\nFile not found.\r\n"};
+
+struct reply REPLY550D = {
+    .code = 550,
+    .msg = "Requested action not taken.\r\nDirectory not empty.\r\n"};
 
 struct reply REPLY550P = {
     .code = 550, .msg = "Requested action not taken.\r\nNo access.\r\n"};
