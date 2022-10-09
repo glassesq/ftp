@@ -1,5 +1,6 @@
 #include "ftp.h"
 
+pthread_mutex_t dir_mutex;
 pthread_t threads[MAX_CONN];
 int sk2th[MAX_CONN];
 char socket_buffer[BUFFER_SIZE];
@@ -711,7 +712,7 @@ int handleRetr(int ftp_socket, struct request req, struct conn_info* info) {
   }
   /* mode check ok, tcp connection is established */
 
-  char* path = realpath(req.params, NULL);
+  char* path = realpathForThread(info->work_dir, req.params);
   if (path == NULL) {
     logw(formatstr(
         "not exist : receive an unacceptable file path when RETR [%s]",
@@ -814,7 +815,6 @@ int handleList(int ftp_socket, struct request req, struct conn_info* info) {
     if ((ret = sendReply(ftp_socket, r)) < 0) {
       return E_SOCKET_WRONG;
     }
-    chdir(config.root);
     return E_WORK_DIR;
   }
 
@@ -964,7 +964,8 @@ int handleMkd(int ftp_socket, struct request req, struct conn_info* info) {
 
   int len = strlen(req.params);
 
-  if (len == 0 || len > 255 || realpath(req.params, NULL) != NULL) {
+  if (len == 0 || len > 255 ||
+      realpathForThread(info->work_dir, req.params) != NULL) {
     // TODO: check more details
     loge("meet invalid parameter when create file");
     if (len == 0 || len > 255)
@@ -986,8 +987,12 @@ int handleMkd(int ftp_socket, struct request req, struct conn_info* info) {
     return E_NOT_UNDERSTAND;
   }
 
+  pthread_mutex_lock(&dir_mutex);
+  chdir(info->work_dir);
   ret = mkdir(req.params, S_IRUSR | S_IWUSR | S_IXUSR | S_IRGRP | S_IXGRP |
                               S_IROTH | S_IXOTH);
+  chdir(config.root);
+  pthread_mutex_unlock(&dir_mutex);
 
   if (ret < 0)
     ret = sendReply(ftp_socket, REPLY550);
@@ -1016,7 +1021,9 @@ int handleCwd(int ftp_socket, struct request req, struct conn_info* info) {
   ret = checkWorkDirAndReply(ftp_socket, info);
   if (ret < 0) return ret;
 
-  if (checkDirectory(req.params) == 0) {
+  char* w = realpathForThread(info->work_dir, req.params);
+
+  if (checkDirectory(w) <= 0) {
     // TODO: check more details
     loge("meet invalid parameter when CWD");
     struct reply r;
@@ -1034,8 +1041,7 @@ int handleCwd(int ftp_socket, struct request req, struct conn_info* info) {
     return E_NOT_UNDERSTAND;
   }
 
-  if (!checkSub(req.params, config.root)) {
-    // 不能删除working dir以上的, 也不能删除config.root之外的
+  if (!checkSub(w, config.root)) {
     ret = sendReply(ftp_socket, REPLY550P);
     if (ret < 0) {
       loge(formatstr("socket %d close unexpectely", ftp_socket));
@@ -1044,9 +1050,7 @@ int handleCwd(int ftp_socket, struct request req, struct conn_info* info) {
     return E_NO_ACCESS;
   }
 
-  char* w = realpath(req.params, NULL);
   strcpy(info->work_dir, w);
-  ret = chdir(w);
 
   if (ret < 0)
     ret = sendReply(ftp_socket, REPLY550);
@@ -1072,7 +1076,9 @@ int handleRmd(int ftp_socket, struct request req, struct conn_info* info) {
   ret = checkWorkDirAndReply(ftp_socket, info);
   if (ret < 0) return ret;
 
-  if (checkDirectory(req.params) == 0) {
+  char* w = realpathForThread(info->work_dir, req.params);
+
+  if (checkDirectory(w) <= 0) {
     loge("meet invalid parameter when create file");
     struct reply r;
     char msg[BUFFER_SIZE];
@@ -1089,11 +1095,9 @@ int handleRmd(int ftp_socket, struct request req, struct conn_info* info) {
     return E_NOT_UNDERSTAND;
   }
 
-  logi(formatstr("dir [%s] pass the first check", req.params));
   logi(formatstr("%s %s", info->work_dir, config.root));
 
-  if (checkSub(info->work_dir, req.params) ||
-      !checkSub(req.params, config.root)) {
+  if (checkSub(info->work_dir, w) || !checkSub(w, config.root)) {
     // 不能删除working dir以上的, 也不能删除config.root之外的
     ret = sendReply(ftp_socket, REPLY550P);
     if (ret < 0) {
@@ -1103,7 +1107,6 @@ int handleRmd(int ftp_socket, struct request req, struct conn_info* info) {
     return E_NO_ACCESS;
   }
 
-  char* w = realpath(req.params, NULL);
   ret = rmdir(w);
   logi(formatstr("try to remove [%s]", w));
 
@@ -1168,7 +1171,6 @@ int checkWorkDir(struct conn_info* info) {
     logw(formatstr("working dir check fail for [%s], switch to [%s]",
                    info->work_dir, config.root));
     strncpy(info->work_dir, config.root, BUFFER_SIZE);
-    chdir(config.root);
     return E_NOT_EXIST;
   }
   return 1;
@@ -1180,7 +1182,6 @@ int checkWorkDirAndReply(int ftp_socket, struct conn_info* info) {
     logw(formatstr("working dir check fail for [%s], switch to [%s]",
                    info->work_dir, config.root));
     strncpy(info->work_dir, config.root, BUFFER_SIZE);
-    chdir(config.root);
     struct reply r;
     char msg[BUFFER_SIZE * 2];
     snprintf(msg, BUFFER_SIZE * 2,
@@ -1210,7 +1211,7 @@ int writeListMessage(struct conn_info* info) {
   while ((sub = readdir(dir)) != NULL) {
     if (strcmp(sub->d_name, ".") == 0 || strcmp(sub->d_name, "..") == 0)
       continue;
-    char* path = realpath(sub->d_name, NULL);
+    char* path = realpathForThread(info->work_dir, sub->d_name);
     if (path == NULL) continue;
 
     stat(path, &buffer);
@@ -1230,7 +1231,7 @@ int writeListMessage(struct conn_info* info) {
   while ((sub = readdir(dir)) != NULL) {
     if (strcmp(sub->d_name, ".") == 0 || strcmp(sub->d_name, "..") == 0)
       continue;
-    char* path = realpath(sub->d_name, NULL);
+    char* path = realpathForThread(info->work_dir, sub->d_name);
     if (path == NULL) continue;
 
     stat(path, &buffer);
@@ -1269,6 +1270,16 @@ int writeListMessage(struct conn_info* info) {
   }
   closedir(dir);
   return 1;
+}
+
+char* realpathForThread(char* workdir, char* path) {
+  if (workdir == NULL || path == NULL) return NULL;
+  pthread_mutex_lock(&dir_mutex);
+  chdir(workdir);  // TODO: ret check.
+  char* r = realpath(path, NULL);
+  chdir(config.root);
+  pthread_mutex_unlock(&dir_mutex);
+  return r;
 }
 
 void* syncRun(void* socket_ptr) {

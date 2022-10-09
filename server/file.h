@@ -22,4 +22,5 @@ A is A's sub.
 */
 int checkSub(char* child, char* parent);
 
+
 #endif

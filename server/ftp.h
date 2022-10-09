@@ -2,8 +2,8 @@
 #define FTP_H
 
 #include <arpa/inet.h>
-#include <errno.h>
 #include <ctype.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <netinet/in.h>
 #include <pthread.h>
@@ -20,6 +20,8 @@
 extern pthread_t threads[MAX_CONN];
 extern int sk2th[MAX_CONN];
 extern char socket_buffer[BUFFER_SIZE];
+
+extern pthread_mutex_t dir_mutex;
 
 enum FTPMode {
   FTP_M_ERROR = -1,
@@ -137,8 +139,8 @@ int handleList(int ftp_socket, struct request req, struct conn_info* info);
 /* check current working dir is valid and change it to default if invalid */
 int checkWorkDir(struct conn_info* info);
 
-
-/* check current working dir is valid and change it to default if invalid, send reply to ftp_socket */
+/* check current working dir is valid and change it to default if invalid, send
+ * reply to ftp_socket */
 int checkWorkDirAndReply(int ftp_socket, struct conn_info* info);
 
 /* gen LIST path message to [msg] */
@@ -156,7 +158,10 @@ int handlePort(int ftp_socket, struct request req, struct conn_info* info);
 /* handle MKD command : mkdir */
 int handleMkd(int ftp_socket, struct request req, struct conn_info* info);
 
-/* handle CWD command : cd */
+/* handle CWD command : cd
+   the process workdir will remain config.root
+   occasionally change to thread's 'work dir' when needed.
+ */
 int handleCwd(int ftp_socket, struct request req, struct conn_info* info);
 
 /* handle PKD command : pwd */
@@ -176,6 +181,8 @@ int clearMode(struct conn_info* info);
 
 /* prepare socket for PORT mode */
 int preparePortSocket(int ftp_socket, struct conn_info* info);
+
+char* realpathForThread(char* workdir, char* path);
 
 /* good bye */
 void bye(void);
