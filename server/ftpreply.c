@@ -23,10 +23,14 @@ struct reply REPLY421 = {
     .code = 421,
     .msg = "Service not available, closing control connection.\r\n"};
 
-struct reply REPLY331 = {.code = 331,
-                         .msg =
-                             "Guest login ok, send your complete e-mail "
-                             "address as password.\r\n"};
+struct reply REPLY331 = {
+    .code = 331,
+    .msg =
+        "Guest login ok, send your complete e-mail address as password.\r\n"};
+
+struct reply REPLY350 = {
+    .code = 350,
+    .msg = "Requested file action pending further information.\r\n"};
 
 struct reply REPLY230 = {.code = 230,
                          .msg = "WELCOME!\r\nguest login ok. Fantastic!\r\n"};

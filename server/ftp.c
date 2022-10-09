@@ -244,6 +244,14 @@ int parseRawRequest(char* raw, struct request* req) {
     req->type = FTP_PWD;
     strcpy(req->params, raw + 3);
     return 1;
+  } else if (startswith(raw, "RNFR")) {
+    req->type = FTP_RNFR;
+    strcpy(req->params, raw + 4);
+    return 1;
+  } else if (startswith(raw, "RNTO")) {
+    req->type = FTP_RNTO;
+    strcpy(req->params, raw + 4);
+    return 1;
   }
   return E_NOT_UNDERSTAND;
 }
@@ -426,6 +434,16 @@ void runFTP(int ftp_socket, struct conn_info* info) {
             return;
           break;
         }
+        case FTP_RNFR: {
+          if ((ret = handleRename(ftp_socket, req, info)) == E_SOCKET_WRONG)
+            return;
+          break;
+        }
+        case FTP_RNTO: {
+          if ((ret = handleUnexpRnto(ftp_socket, req, info)) == E_SOCKET_WRONG)
+            return;
+          break;
+        }
         default: {
           sendReply(ftp_socket, REPLY500);
         }
@@ -443,6 +461,19 @@ int handleUnexpPass(int ftp_socket, struct request req,
     return E_SOCKET_WRONG;
   }
   logi(formatstr("socket %d: recieve password [%s] unexpectly", ftp_socket,
+                 req.params));
+  return 1;
+}
+
+int handleUnexpRnto(int ftp_socket, struct request req,
+                    struct conn_info* info) {
+  clearMode(info);
+  int ret = sendReply(ftp_socket, REPLY503);
+  if (ret < 0) {
+    loge(formatstr("socket %d close unexpectely", ftp_socket));
+    return E_SOCKET_WRONG;
+  }
+  logi(formatstr("socket %d: recieve rnto [%s] unexpectly", ftp_socket,
                  req.params));
   return 1;
 }
@@ -495,6 +526,78 @@ int handleLogin(int sock, struct request req, struct conn_info* info) {
     }
   } else {
     info->id = 1;  // TODO: user id
+  }
+  return 1;
+}
+
+int handleRename(int ftp_socket, struct request req, struct conn_info* info) {
+  clearMode(info);
+  int ret;
+  if ((ret = checkLogin(ftp_socket, info) < 0)) return ret;
+
+  char* w = realpathForThread(info->work_dir, req.params);
+  if (w == NULL || checkSub(info->work_dir, w))
+    ret = sendReply(ftp_socket, REPLY550P);
+  else
+    ret = sendReply(ftp_socket, REPLY350);
+
+  if (ret < 0) {
+    loge(formatstr("socket %d close unexpectely", ftp_socket));
+    return E_SOCKET_WRONG;
+  }
+
+  struct request rnto_req;
+  char result[BUFFER_SIZE];
+  ret = readOneRequest(ftp_socket, result);
+  if (ret < 0) {
+    return E_SOCKET_WRONG;
+  }
+  ret = parseRawRequest(result, &rnto_req);
+
+  if (ret < 0) {
+    logw(formatstr("socket %d cannot understand this request: %s", ftp_socket,
+                   result));
+    ret = sendReply(ftp_socket, REPLY500);
+    return 1;
+  }
+
+  if (rnto_req.type != FTP_RNTO) {
+    loge("not understand this command sequences");
+    ret = sendReply(ftp_socket, REPLY503);
+    return 1;
+  }
+
+  // TODO: change the name
+  char* w_new = realpathForThread(info->work_dir, rnto_req.params);
+
+  if (w_new != NULL) {
+    struct reply r;
+    char msg[BUFFER_SIZE];
+    sprintf(msg, "File/Directory %.4096s already exists.", w_new);
+    genReply(&r, 550, msg);
+    ret = sendReply(ftp_socket, r);
+  } else {
+    logi(formatstr("socket %d: file [%s] change to  [%s]", ftp_socket,
+                   req.params, rnto_req.params));
+    logi(formatstr("%s->%s", w, rnto_req.params));
+
+    pthread_mutex_lock(&dir_mutex);
+    chdir(info->work_dir);
+
+    ret = rename(w, rnto_req.params);
+
+    chdir(config.root);
+    pthread_mutex_unlock(&dir_mutex);
+
+    if (ret < 0)
+      ret = sendReply(ftp_socket, REPLY550);
+    else
+      ret = sendReply(ftp_socket, REPLY250);
+  }
+
+  if (ret == E_SOCKET_WRONG) {
+    loge(formatstr("socket %d close unexpectely", ftp_socket));
+    return E_SOCKET_WRONG;
   }
   return 1;
 }

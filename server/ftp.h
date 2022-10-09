@@ -47,6 +47,8 @@ enum FTPType {
   FTP_CWD,
   FTP_RMD,
   FTP_PWD,
+  FTP_RNFR,
+  FTP_RNTO,
 };
 
 struct conn_info {
@@ -133,8 +135,14 @@ int handleQuit(int ftp_socket, struct request req, struct conn_info* info);
 /* handle ABOR and quit */
 int handleAbor(int ftp_socket, struct request req, struct conn_info* info);
 
-/* handle ABOR and quit */
+/* handle List */
 int handleList(int ftp_socket, struct request req, struct conn_info* info);
+
+/* handle rename */
+int handleRename(int ftp_socket, struct request req, struct conn_info* info);
+
+/* handle unexpected rnto */
+int handleUnexpRnto(int ftp_socket, struct request req, struct conn_info* info);
 
 /* check current working dir is valid and change it to default if invalid */
 int checkWorkDir(struct conn_info* info);
