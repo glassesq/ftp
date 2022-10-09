@@ -38,6 +38,14 @@ struct reply REPLY230 = {.code = 230,
 struct reply REPLY250 = {.code = 250,
                          .msg = "Requested file action okay, completed.\r\n"};
 
+struct reply REPLY425 = {
+    .code = 425,
+    .msg =
+        "Can not open data connection.\r\nNo established TCP connection.\r\n"};
+
+struct reply REPLY426 = {.code = 426,
+                         .msg = "Connection closed; transfer aborted.\r\n"};
+
 struct reply REPLY500 = {.code = 500,
                          .msg = "Syntax error, command unrecognized.\r\n"};
 
@@ -59,11 +67,6 @@ struct reply REPLY550D = {
 
 struct reply REPLY550P = {
     .code = 550, .msg = "Requested action not taken.\r\nNo access.\r\n"};
-
-struct reply REPLY425 = {
-    .code = 425,
-    .msg =
-        "Can not open data connection.\r\nNo established TCP connection.\r\n"};
 
 struct reply REPLY226 = {
     .code = 226,

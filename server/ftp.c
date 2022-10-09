@@ -11,9 +11,12 @@ void startServer(int argc, char* argv[]) {
     bye();
     return;
   }
-  // TODO: wrap chdir
-  chdir(config.root);
-  int ret = startListen(config.port, config.max_connect);
+  int ret = chdir(config.root);
+  if (ret < 0) {
+    loge(formatstr("change dir to config.root failed %s", config.root));
+    return;
+  }
+  ret = startListen(config.port, config.max_connect);
   if (ret < 0) loge("listen failed");
 }
 
@@ -83,7 +86,7 @@ int startListen(int port, int connection) {
   logi(formatstr("listen ok... listening at port %d", port));
 
   while (1) {
-    int new_socket = accept(server_socket, NULL, NULL);  // TODO
+    int new_socket = accept(server_socket, NULL, NULL);
     intd(new_socket);
     logi("some one knock the door, we try to accept it");
     if (new_socket < 0) {
@@ -299,7 +302,7 @@ int writeFile(int sock, char* path) {
   }
 
   int ret;
-  int count = 0;  // TODO: count should be long?
+  int count = 0;
   // read from file trunk by trunk.
   while (1) {
     int n = fread(buffer, 1, BUFFER_SIZE, f);
@@ -329,7 +332,6 @@ int writeFile(int sock, char* path) {
 int greeting(int sock) { return sendReply(sock, REPLY220); }
 
 void clearConn(int ftp_socket, struct conn_info* info) {
-  // TODO: gracefully maybe?
   clearMode(info);
   shutdown(ftp_socket, SHUT_RDWR);
   // TODO: close needed here?
@@ -343,6 +345,10 @@ void runFTP(int ftp_socket, struct conn_info* info) {
     return;
   }
 
+  struct sockaddr_in addr;
+  socklen_t slen = sizeof(addr);
+  getpeername(ftp_socket, (struct sockaddr*)&addr, &slen);
+  info->peer_ip = addr.sin_addr.s_addr;
   info->id = -1;             /* not login at first */
   info->dserver_socket = -1; /* not data socket by now */
   info->d_socket = -1;
@@ -482,7 +488,7 @@ int handleLogin(int sock, struct request req, struct conn_info* info) {
   clearMode(info);
   if (info->id >= 0) {
     logw("try to log in repeatedly");
-    // TODO: what happened here?
+    /* if log success, change info->id. otherwise remains the same. */
   }
 
   int ret = sendReply(sock, REPLY331);
@@ -525,7 +531,7 @@ int handleLogin(int sock, struct request req, struct conn_info* info) {
       return E_SOCKET_WRONG;
     }
   } else {
-    info->id = 1;  // TODO: user id
+    info->id = 1;
   }
   return 1;
 }
@@ -567,7 +573,6 @@ int handleRename(int ftp_socket, struct request req, struct conn_info* info) {
     return 1;
   }
 
-  // TODO: change the name
   char* w_new = realpathForThread(info->work_dir, rnto_req.params);
 
   if (w_new != NULL) {
@@ -857,7 +862,7 @@ int handleRetr(int ftp_socket, struct request req, struct conn_info* info) {
         loge(formatstr("socket %d close unexpectely", ftp_socket));
         return E_SOCKET_WRONG;
       }
-      return E_DSOCKET;  // TODO: 426 connection closed. transfer aborted.
+      return E_DSOCKET;
     }
     logd(formatstr("PORT mode: d_socket %d prepared", info->d_socket));
   }
@@ -869,9 +874,12 @@ int handleRetr(int ftp_socket, struct request req, struct conn_info* info) {
 
   // everything is done, then send ftp_socket the reply
   if (ret != E_SOCKET_WRONG) {
-    if (ret < 0)
-      ret = sendReply(ftp_socket, REPLY500);
-    else
+    if (ret < 0) {
+      if (ret == E_DSOCKET)
+        ret = sendReply(ftp_socket, REPLY426);
+      else
+        ret = sendReply(ftp_socket, REPLY500);
+    } else
       ret = sendReply(ftp_socket, REPLY226);
   }
   if (ret < 0) {
@@ -903,8 +911,6 @@ int handleList(int ftp_socket, struct request req, struct conn_info* info) {
 
   logd(formatstr("mode checked for RETR, we are about to LIST [%s]",
                  config.root));
-
-  // TODO: hello?
 
   ret = checkWorkDir(info);
   if (ret < 0) {
@@ -972,7 +978,7 @@ int preparePortSocket(int ftp_socket, struct conn_info* info) {
   int sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
   int ret;
   if (sock < 0) {
-    ret = sendReply(ftp_socket, REPLY500);  // TODO
+    ret = sendReply(ftp_socket, REPLY500);
     if (ret < 0) {
       loge(formatstr("socket %d close unexpectely", ftp_socket));
       return E_SOCKET_WRONG;
@@ -983,7 +989,7 @@ int preparePortSocket(int ftp_socket, struct conn_info* info) {
 
   ret = connect(sock, (struct sockaddr*)&addr, sizeof(addr));
   if (ret < 0) {
-    ret = sendReply(ftp_socket, REPLY500);  // TODO
+    ret = sendReply(ftp_socket, REPLY500);
     if (ret < 0) {
       loge(formatstr("socket %d close unexpectely", ftp_socket));
       return E_SOCKET_WRONG;
@@ -1069,7 +1075,6 @@ int handleMkd(int ftp_socket, struct request req, struct conn_info* info) {
 
   if (len == 0 || len > 255 ||
       realpathForThread(info->work_dir, req.params) != NULL) {
-    // TODO: check more details
     loge("meet invalid parameter when create file");
     if (len == 0 || len > 255)
       ret = sendReply(ftp_socket, REPLY501);
@@ -1127,7 +1132,6 @@ int handleCwd(int ftp_socket, struct request req, struct conn_info* info) {
   char* w = realpathForThread(info->work_dir, req.params);
 
   if (checkDirectory(w) <= 0) {
-    // TODO: check more details
     loge("meet invalid parameter when CWD");
     struct reply r;
     char msg[BUFFER_SIZE];
@@ -1378,9 +1382,14 @@ int writeListMessage(struct conn_info* info) {
 char* realpathForThread(char* workdir, char* path) {
   if (workdir == NULL || path == NULL) return NULL;
   pthread_mutex_lock(&dir_mutex);
-  chdir(workdir);  // TODO: ret check.
-  char* r = realpath(path, NULL);
-  chdir(config.root);
+  char* r;
+  int ret = chdir(workdir);
+  if (ret < 0)
+    r = NULL; /* change dir to workdir failed */
+  else {
+    r = realpath(path, NULL);
+    chdir(config.root);
+  }
   pthread_mutex_unlock(&dir_mutex);
   return r;
 }
@@ -1402,13 +1411,21 @@ void* syncData(void* info_ptr) {
   struct conn_info* info = (struct conn_info*)info_ptr;
   /* waiting someone connect the data port */
   while (1) {
-    int new_socket = accept(info->dserver_socket, NULL,
-                            NULL);  // TODO: check ip address to avoid attacker
+    struct sockaddr_in addr;
+    socklen_t s_len = sizeof(addr);
+    int new_socket =
+        accept(info->dserver_socket, (struct sockaddr*)&addr, &s_len);
     logi("some one knock the data server door, we try to accept it");
+    if (info->peer_ip != addr.sin_addr.s_addr) { /* avoid attackers */
+      loge(formatstr("we refuse a unknown ip's [%s] connect.\n",
+                     inet_ntoa(addr.sin_addr)));
+      continue;
+    }
     if (new_socket < 0) {
       loge("failed to accept connection");
       continue;
     }
+    //    if( addr.sin_addr.s_addr !=
     logi("accept ok");
     info->d_socket = new_socket;
     break;
@@ -1423,7 +1440,6 @@ void* syncData(void* info_ptr) {
 }
 
 void runSocket(int sock) {
-  // TODO: try / catch
   int id = getNewThreadId();
   if (id < 0) {
     loge("no more space for new thread");

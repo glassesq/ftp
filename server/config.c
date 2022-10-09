@@ -43,7 +43,6 @@ int parseArgument(int argc, char* argv[]) {
 
 int checkConfig(void) {
   if (config.port < 0) return -1;
-  // TODO
   if (checkDirectory(config.root) < 0) return E_NOT_EXIST;
   return 1;
 }

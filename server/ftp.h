@@ -53,13 +53,14 @@ enum FTPType {
 
 struct conn_info {
   int id;
-  enum FTPMode mode;  // TODO: lock required
+  enum FTPMode mode;
   in_addr_t pomode_ip;
   in_port_t pomode_port;
   int dserver_socket;
   int d_socket;
   pthread_t d_thread;
   char work_dir[BUFFER_SIZE];
+  in_addr_t peer_ip;
 };
 
 struct request {

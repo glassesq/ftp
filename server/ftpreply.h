@@ -27,6 +27,7 @@ extern struct reply REPLY250;
 extern struct reply REPLY331;
 extern struct reply REPLY350;
 extern struct reply REPLY421;
+extern struct reply REPLY426;
 extern struct reply REPLY500;
 extern struct reply REPLY501;
 extern struct reply REPLY503;
