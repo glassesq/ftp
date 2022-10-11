@@ -38,6 +38,7 @@ enum FTPType {
   FTP_PASV,
   FTP_PORT,
   FTP_RETR,
+  FTP_STOR,
   FTP_QUIT,
   FTP_ABOR,
   FTP_LIST,
@@ -112,6 +113,15 @@ int writeRaw(int sock, char* raw);
 /* write raw to sock */
 int writeFile(int sock, char* path);
 
+/* read raw to sock */
+int readFile(int sock, char* path);
+
+/* read sock to file */
+int saveToFile(FILE* f, char* buf, int len);
+
+/* read binary from socket*/
+int readBinary(int sock, char* raw, int* len);
+
 /* parse a raw request to get a struct req */
 int parseRawRequest(char* raw, struct request* req);
 
@@ -120,6 +130,9 @@ int handleLogin(int ftp_socket, struct request req, struct conn_info* info);
 
 /* handle RETR command */
 int handleRetr(int ftp_socket, struct request req, struct conn_info* info);
+
+/* handle STOR command */
+int handleStor(int ftp_socket, struct request req, struct conn_info* info);
 
 /* handle PASV mode */
 int handlePasv(int ftp_socket, struct request req, struct conn_info* info);

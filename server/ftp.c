@@ -211,6 +211,10 @@ int parseRawRequest(char* raw, struct request* req) {
     req->type = FTP_RETR;
     strcpy(req->params, raw + 4);
     return 1;
+  } else if (startswith(raw, "STOR")) {
+    req->type = FTP_STOR;
+    strcpy(req->params, raw + 4);
+    return 1;
   } else if (startswith(raw, "SYST")) {
     req->type = FTP_SYST;
     strcpy(req->params, raw + 4);
@@ -275,6 +279,16 @@ int writeRaw(int sock, char* raw) {
   return 1;
 }
 
+int readBinary(int sock, char* raw, int* len) {
+  if (raw == NULL) return E_NULL;
+  *len = read(sock, raw, BUFFER_SIZE);
+  if (*len < 0) {
+    logd("write go wrong, mostly beacuse the socket is closed");
+    return E_WRITE_WRONG;
+  }
+  return 1;
+}
+
 int writeBinary(int sock, char* raw, int len) {
   if (raw == NULL) return E_NULL;
   int n = write(sock, raw, len);
@@ -286,6 +300,59 @@ int writeBinary(int sock, char* raw, int len) {
     logd("write incomplete");
     return E_WRITE_INCOMP;
   }
+  return 1;
+}
+
+int saveToFile(FILE* f, char* buf, int len) {
+  int n = fwrite(buf, 1, len, f);
+  if (n < 0) {
+    logd("save go wrong, mostly beacuse the socket is closed");
+    return E_WRITE_WRONG;
+  }
+  if (n < len) {
+    logd("save incomplete");
+    return E_WRITE_INCOMP;
+  }
+  return 1;
+}
+
+int readFile(int sock, char* path) {
+  /* read a file from socket */
+  char buffer[BUFFER_SIZE + 1];
+
+  FILE* f = fopen(path, "wb");
+  if (f == NULL) {
+    loge(formatstr("cannot open the target file [%s]", path));
+    return E_FILE_SYS;
+  }
+
+  int ret;
+  int count = 0;
+  // read from file trunk by trunk.
+  while (1) {
+    int n;
+    ret = readBinary(sock, buffer, &n);
+    // TODO: using preferred I/O block size.
+    if (ret < 0) {
+      loge(formatstr("cannot read the target file", path));
+      return E_FILE_SYS;
+    }
+    if (ret > 0) {
+      count += n;
+      ret = saveToFile(f, buffer, n);
+      if (ret < 0) {
+        loge(formatstr("cannot write to the data socket %d", sock));
+        return E_DSOCKET;
+      }
+    }
+    if (n < BUFFER_SIZE) {
+      /* it reach the file end, EOF will be sent later by shuting down */
+      break;
+    }
+  }
+  logi(formatstr("Finished to write file[%s] with %d bytes to socket %d", path,
+                 count, sock));
+  fclose(f);
   return 1;
 }
 
@@ -397,6 +464,12 @@ void runFTP(int ftp_socket, struct conn_info* info) {
             return;
           break;
         }
+        case FTP_STOR: {
+          if ((ret = handleStor(ftp_socket, req, info)) == E_SOCKET_WRONG)
+            return;
+          break;
+        }
+
         case FTP_TYPE: {
           if ((ret = handleType(ftp_socket, req, info)) == E_SOCKET_WRONG)
             return;
@@ -818,6 +891,70 @@ int parseHostPort(char* raw, in_addr_t* host, in_port_t* port) {
   if (num1 < 0 || num2 < 0) return E_NOT_UNDERSTAND;
 
   *port = htons(num1 * 256 + num2);
+
+  return 1;
+}
+
+int handleStor(int ftp_socket, struct request req, struct conn_info* info) {
+  int ret;
+  if ((ret = checkLogin(ftp_socket, info) < 0)) return ret;
+
+  if (info->mode != FTP_M_PASV_ACCEPT && info->mode != FTP_M_PORT_WAIT) {
+    logw("tcp connection not prepared");
+    ret = sendReply(ftp_socket, REPLY425);
+    if (ret < 0) {
+      loge(formatstr("socket %d close unexpectely", ftp_socket));
+      return E_SOCKET_WRONG;
+    }
+    return E_DSOCKET;
+  }
+  /* mode check ok, tcp connection is established */
+
+  /* File check ok. Now trasfer it. */
+  logd(formatstr("file & mode checked for RETR, we are about to transfer [%s]",
+                 req.params));
+  if ((ret = sendReply(ftp_socket, REPLY150)) < 0) {
+    loge(formatstr("socket %d close unexpectely", ftp_socket));
+    return E_SOCKET_WRONG;
+  }
+
+  if (info->mode == FTP_M_PORT_WAIT) {
+    logd("port mode: try to prepare socket");
+    ret = preparePortSocket(ftp_socket, info);
+    if (ret < 0) {
+      ret = sendReply(ftp_socket, REPLY425);
+      if (ret < 0) {
+        loge(formatstr("socket %d close unexpectely", ftp_socket));
+        return E_SOCKET_WRONG;
+      }
+      return E_DSOCKET;
+    }
+    logd(formatstr("PORT mode: d_socket %d prepared", info->d_socket));
+  }
+
+  int d_socket = info->d_socket;
+
+  // In current thread, transfer the file to d_socket
+  ret = readFile(d_socket, req.params);
+
+  // everything is done, then send ftp_socket the reply
+  if (ret != E_SOCKET_WRONG) {
+    if (ret < 0) {
+      if (ret == E_DSOCKET)
+        ret = sendReply(ftp_socket, REPLY426);
+      else
+        ret = sendReply(ftp_socket, REPLY500);
+    } else
+      ret = sendReply(ftp_socket, REPLY226);
+  }
+  if (ret < 0) {
+    loge(formatstr("socket %d close unexpectely", ftp_socket));
+    return E_SOCKET_WRONG;
+  }
+
+  info->mode = FTP_M_EMPTY;
+  // shutdown(d_socket, SHUT_RDWR);
+  close(d_socket);
 
   return 1;
 }
