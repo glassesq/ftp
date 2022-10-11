@@ -370,7 +370,6 @@ const ftpservice = {
       this.dserver_socket.on("listening", () => {
         const port = this.dserver_socket.address().port;
         let msg =
-          "=" +
           this.ftp_socket.localAddress +
           "." +
           parseInt(port / 256) +

@@ -145,8 +145,6 @@ const ftpc = {
   },
   actOnce: function () {
     logger.debug("[actOnce] start listen to user act");
-    if (this.current_action.action == "init") {
-    }
     /* [event trigger] read from user */
     const command = prompt("ftpc>");
     if (command == null) {
