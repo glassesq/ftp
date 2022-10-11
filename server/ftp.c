@@ -586,7 +586,7 @@ int handleRename(int ftp_socket, struct request req, struct conn_info* info) {
   if (w_new != NULL) {
     struct reply r;
     char msg[BUFFER_SIZE];
-    sprintf(msg, "File/Directory %.4096s already exists.", w_new);
+    sprintf(msg, "File/Directory %.4096s already exists.\r\n", w_new);
     genReply(&r, 550, msg);
     ret = sendReply(ftp_socket, r);
   } else {
@@ -905,7 +905,8 @@ int handleRetr(int ftp_socket, struct request req, struct conn_info* info) {
   }
 
   info->mode = FTP_M_EMPTY;
-  shutdown(d_socket, SHUT_RDWR);
+  // shutdown(d_socket, SHUT_RDWR);
+  close(d_socket);
 
   return 1;
 }
@@ -982,7 +983,8 @@ int handleList(int ftp_socket, struct request req, struct conn_info* info) {
   logi(formatstr("socket %d LIST transfer ok.", ftp_socket));
 
   info->mode = FTP_M_EMPTY;
-  shutdown(d_socket, SHUT_RDWR);
+  // shutdown(d_socket, SHUT_RDWR);
+  close(d_socket);
 
   return 1;
 }

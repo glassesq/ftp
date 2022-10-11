@@ -2,7 +2,6 @@ import { initFTP } from "./ftp.js";
 import log4js from "log4js";
 import promptSync from "prompt-sync";
 import { EventEmitter } from "events";
-import { Console, info } from "console";
 
 const prompt = promptSync();
 
@@ -13,10 +12,6 @@ const ftpc = {
   ftpc_emitter: new EventEmitter(),
   client: null,
   islogin: true,
-  current_action: {
-    action:
-      "init" /*init, login_u, login_p, rename, cd, pwd, get, send, passive*/,
-  },
   info: {
     host: null,
     port: null,
@@ -29,7 +24,7 @@ const ftpc = {
       );
       let user;
       if (command.trim() == "login" || command.trim() == "user") {
-        user = prompt("Name:");
+        user = prompt("(username) ");
       } else {
         user = command.trim().split(" ").at(-1);
       }
@@ -48,7 +43,7 @@ const ftpc = {
       this.client.runAct({ action: "User", username: user });
     } else if (step == "pass") {
       // console.log("Enter your password.");
-      const password = prompt("Password:", { echo: "*" });
+      const password = prompt("(password) ", { echo: "*" });
       this.client.setReact((reaction) => {
         if (reaction.reply.code == 230) {
           console.log(reaction.message);
@@ -70,16 +65,24 @@ const ftpc = {
   },
   rename: function (command) {
     const action = { action: "Rename" };
-    if (command.trim() == "mkdir") {
+    if (command.trim() == "rename") {
+      action.from = prompt("(from-name) ");
+      action.to = prompt("(to-name) ");
     } else {
       action.from = command.trim().split(" ").at(-2);
       action.to = command.trim().split(" ").at(-1);
+    }
+    if (action.from.trim() == "" || action.to.trim() == "") {
+      console.log("invalid parameters");
+      this.ftpc_emitter.emit("act");
+      return;
     }
     this.client.runAct(action);
   },
   mkdir: function (command) {
     const action = { action: "Mkdir" };
     if (command.trim() == "mkdir") {
+      action.dir = prompt("(directory-name) ");
     } else {
       action.dir = command.trim().split(" ").at(-1);
     }
@@ -88,6 +91,7 @@ const ftpc = {
   rmdir: function (command) {
     const action = { action: "Rmdir" };
     if (command.trim() == "rmdir") {
+      action.dir = prompt("(directory-name) ");
     } else {
       action.dir = command.trim().split(" ").at(-1);
     }
@@ -96,6 +100,7 @@ const ftpc = {
   cd: function (command) {
     const action = { action: "Cwd" };
     if (command.trim() == "cd") {
+      action.dir = prompt("(directory-name) ");
     } else {
       action.dir = command.trim().split(" ").at(-1);
     }
@@ -111,11 +116,38 @@ const ftpc = {
       return;
     }
   },
+  get: function (command) {
+    const action = { action: "Get" };
+    if (command.trim() == "get") {
+      action.remote = prompt("(remote-file) ");
+      action.local = prompt("(local-file) ");
+      if (action.local.trim() == "")
+        action.local = action.remote.split("/").at(-1);
+    } else {
+      const re = /[\s]+/;
+      console.log(command.trim().split(re));
+      if (command.trim().split(re).length == 2) {
+        action.remote = command.trim().split(re).at(-1);
+        action.local = prompt("(local-file) ");
+        if (action.local.trim() == "")
+          action.local = action.remote.split(re).at(-1);
+      } else {
+        action.remote = command.trim().split(re).at(-2);
+        action.local = command.trim().split(re).at(-1);
+      }
+    }
+    if (action.remote.trim() == "" || action.local.trim() == "") {
+      console.log("invalid parameters");
+      this.ftpc_emitter.emit("act");
+      return;
+    }
+    this.client.runAct(action);
+  },
   actOnce: function () {
     logger.debug("[actOnce] start listen to user act");
     if (this.current_action.action == "init") {
     }
-    /* [event trigger] read from user, shall check context */
+    /* [event trigger] read from user */
     const command = prompt("ftpc>");
     if (command == null) {
       this.client.killService();
@@ -148,6 +180,14 @@ const ftpc = {
       this.client.runAct({ action: "System" });
     } else if (command.startsWith("binary")) {
       this.client.runAct({ action: "Binary" });
+    } else if (command.startsWith("get")) {
+      this.get(command);
+    } else if (
+      command.startsWith("bye") ||
+      command.startsWith("quit") ||
+      command.startsWith("exit")
+    ) {
+      this.client.runAct({ action: "Quit" });
     } else if (command.startsWith("help")) {
       console.log(this.help_message.join("\n"));
       this.ftpc_emitter.emit("act");
@@ -159,12 +199,9 @@ const ftpc = {
   },
   /* display a message from service, decide to wait more info OR actOnce OR kill service*/
   reactOnce: function (reaction) {
-    // logger.debug("[reactOnce] gen: " + reply.genMessage());
     logger.debug("[reactOnce] reaction received");
     console.log(reaction.message);
-    /* [callback function] get one reply from user */
 
-    /* process reply [with action context]*/
     if (reaction.kill) {
       console.log("FTP service end");
       this.client.killService();
@@ -175,10 +212,6 @@ const ftpc = {
       this.ftpc_emitter.emit("act");
       return;
     }
-
-    /* case mark: wait until a new event */
-    /* case response and not stop: call actOnce */
-    /* case response and stop: exit */
   },
   run: function () {
     this.ftpc_emitter.on("act", this.actOnce.bind(this)); /* act -> actOnce */
@@ -202,17 +235,16 @@ const ftpc = {
     console.log(
       "Trying to connect to " + this.info.host + ":" + this.info.port
     );
-
     /* waiting for greeting message */
   },
   help_message: [
     "help: ",
     "binary                      - set to binary mode [TYPE I] ",
-    "!bye                         - exit() ",
+    "bye                         - exit() ",
     "cd <dir>                    - cd directory [CWD] ",
     "dir                         - list current directory [PASV/PORT][LIST] n",
     "exit                        - exit() [QUIT] ",
-    "!get <remote-file> <file>    - get remote-file to file [PASV/PORT][RETR] ",
+    "get <remote-file> <file>    - get remote-file to file [PASV/PORT][RETR] ",
     "help                        - show this help page  ",
     "ls                          - list current directory [PASV/PORT][LIST] ",
     "login                       - Login to the server   [USER/PASS] ",
@@ -221,28 +253,14 @@ const ftpc = {
     "pwd                         - show current directory [PWD] ",
     "quit                        - exit() [QUIT] ",
     "rename <file> <new_name>    - rename file [RNFR/RNTO] ",
-    "!rmdir <dir>                 - remove directory [RMD] ",
+    "rmdir <dir>                 - remove directory [RMD] ",
     "!send <file> <remote-file>   - send file to server [PASV/PORT][STOR <file>]  ",
     "system                      - show system [SYST]  ",
-    "user                        - login to the server [USER/PASS]",
+    "user <username>             - login to the server [USER/PASS]",
   ],
 };
 
-/* sendAction(
-  client,
-  {
-    action: "Login",
-    username: "user",
-    password: "pass",
-  },
-  callback
-); */
-
-// TODO: only for test here
-logger.log("Welcome to FTPC!");
 console.log("Welcome to FTPC!");
-// const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-// await delay(3000); /// waiting 1 second.
 
 ftpc.run();
 
