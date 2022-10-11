@@ -775,6 +775,13 @@ int parseHostPort(char* raw, in_addr_t* host, in_port_t* port) {
   int len = strlen(raw);
   int cnt = 0, point = 0;
   for (cnt = 0; cnt < len; cnt++) {
+    if (raw[cnt] >= '0' && raw[cnt] <= '9') {
+      break;
+    }
+  }
+  int off = cnt;
+
+  for (; cnt < len; cnt++) {
     if (raw[cnt] == '.') {
       point++;
       if (point == 4) {
@@ -786,7 +793,7 @@ int parseHostPort(char* raw, in_addr_t* host, in_port_t* port) {
   if (point != 4) {
     return E_NOT_UNDERSTAND;
   }
-  *host = inet_addr(raw + 1);
+  *host = inet_addr(raw + off);
 
   if (*host == (in_addr_t)(-1)) {
     return E_NOT_UNDERSTAND;
