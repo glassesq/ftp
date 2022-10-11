@@ -542,9 +542,17 @@ int handleRename(int ftp_socket, struct request req, struct conn_info* info) {
   if ((ret = checkLogin(ftp_socket, info) < 0)) return ret;
 
   char* w = realpathForThread(info->work_dir, req.params);
-  if (w == NULL || checkSub(info->work_dir, w))
-    ret = sendReply(ftp_socket, REPLY550P);
-  else
+  if (w == NULL || checkSub(info->work_dir, w)) {
+    if (w == NULL)
+      ret = sendReply(ftp_socket, REPLY550E);
+    else
+      ret = sendReply(ftp_socket, REPLY550P);
+    if (ret < 0) {
+      loge(formatstr("socket %d close unexpectely", ftp_socket));
+      return E_SOCKET_WRONG;
+    }
+    return E_NOT_EXIST;
+  } else
     ret = sendReply(ftp_socket, REPLY350);
 
   if (ret < 0) {
@@ -588,6 +596,8 @@ int handleRename(int ftp_socket, struct request req, struct conn_info* info) {
 
     pthread_mutex_lock(&dir_mutex);
     chdir(info->work_dir);
+
+    // TODO: rnto_req.params permission check.
 
     ret = rename(w, rnto_req.params);
 
@@ -776,7 +786,7 @@ int parseHostPort(char* raw, in_addr_t* host, in_port_t* port) {
   if (point != 4) {
     return E_NOT_UNDERSTAND;
   }
-  *host = inet_addr(raw);
+  *host = inet_addr(raw + 1);
 
   if (*host == (in_addr_t)(-1)) {
     return E_NOT_UNDERSTAND;
