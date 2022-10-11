@@ -2,7 +2,7 @@ import { initFTP } from "./ftp.js";
 import log4js from "log4js";
 import promptSync from "prompt-sync";
 import { EventEmitter } from "events";
-import { Console } from "console";
+import { Console, info } from "console";
 
 const prompt = promptSync();
 
@@ -22,30 +22,21 @@ const ftpc = {
     port: null,
   },
   connectServer: function () {},
-  login: function (step = "user") {
+  login: function (command, step = "user") {
     if (step == "user") {
-      // console.log("Enter your username.");
-      const username = prompt("Name:");
+      console.log(
+        "Try to login to target server " + this.info.host + ":" + this.info.port
+      );
+      let user;
+      if (command.trim() == "login" || command.trim() == "user") {
+        user = prompt("Name:");
+      } else {
+        user = command.trim().split(" ").at(-1);
+      }
       this.client.setReact((reaction) => {
         if (reaction.reply.code == 331) {
           console.log(reaction.message);
-          this.login("pass");
-        } else {
-          if (!reaction.wait) {
-            console.log(reaction.message);
-            this.setReact(this.reactOnce.bind(this));
-            this.ftpc_emitter.emit("act");
-          }
-        }
-      });
-      this.client.runAct({ action: "User", username: username });
-    } else if (step == "pass") {
-      // console.log("Enter your password.");
-      const username = prompt("Password:");
-      this.client.setReact((reaction) => {
-        if (reaction.reply.code == 230) {
-          console.log(reaction.message);
-          this.login("over");
+          this.login(command, "pass");
         } else {
           if (!reaction.wait) {
             console.log(reaction.message);
@@ -54,7 +45,23 @@ const ftpc = {
           }
         }
       });
-      this.client.runAct({ action: "Pass", username: username });
+      this.client.runAct({ action: "User", username: user });
+    } else if (step == "pass") {
+      // console.log("Enter your password.");
+      const password = prompt("Password:", { echo: "*" });
+      this.client.setReact((reaction) => {
+        if (reaction.reply.code == 230) {
+          console.log(reaction.message);
+          this.login(command, "over");
+        } else {
+          if (!reaction.wait) {
+            console.log(reaction.message);
+            this.client.setReact(this.reactOnce.bind(this));
+            this.ftpc_emitter.emit("act");
+          }
+        }
+      });
+      this.client.runAct({ action: "Pass", password: password });
     } else if (step == "over") {
       this.islogin = true;
       this.client.setReact(this.reactOnce.bind(this));
@@ -121,9 +128,9 @@ const ftpc = {
     // if( command.endsWith("\n") )
     logger.debug("User enter command: " + command);
     /* ret = sendAction to ftpclient */
-    if (command.startsWith("login")) {
-      this.login("user");
-    } else if (command.startsWith("ls")) {
+    if (command.startsWith("login") || command.startsWith("user")) {
+      this.login(command, "user");
+    } else if (command.startsWith("ls") || command.startsWith("dir")) {
       this.client.runAct({ action: "List" });
     } else if (command.startsWith("mkdir")) {
       this.mkdir(command);
@@ -137,8 +144,16 @@ const ftpc = {
       this.client.runAct({ action: "Pwd" });
     } else if (command.startsWith("passive")) {
       this.client.runAct({ action: "Passive" });
+    } else if (command.startsWith("system")) {
+      this.client.runAct({ action: "System" });
+    } else if (command.startsWith("binary")) {
+      this.client.runAct({ action: "Binary" });
+    } else if (command.startsWith("help")) {
+      console.log(this.help_message.join("\n"));
+      this.ftpc_emitter.emit("act");
     } else {
       logger.debug("receive a unknown command" + command);
+      console.log('invalid command. Try enter "help" to show help page');
       this.ftpc_emitter.emit("act");
     }
   },
@@ -190,6 +205,27 @@ const ftpc = {
 
     /* waiting for greeting message */
   },
+  help_message: [
+    "help: ",
+    "binary                      - set to binary mode [TYPE I] ",
+    "!bye                         - exit() ",
+    "cd <dir>                    - cd directory [CWD] ",
+    "dir                         - list current directory [PASV/PORT][LIST] n",
+    "exit                        - exit() [QUIT] ",
+    "!get <remote-file> <file>    - get remote-file to file [PASV/PORT][RETR] ",
+    "help                        - show this help page  ",
+    "ls                          - list current directory [PASV/PORT][LIST] ",
+    "login                       - Login to the server   [USER/PASS] ",
+    "mkdir <dir>                 - make directory  [MKD] ",
+    "passive                     - switch PASV/PORT mode   ",
+    "pwd                         - show current directory [PWD] ",
+    "quit                        - exit() [QUIT] ",
+    "rename <file> <new_name>    - rename file [RNFR/RNTO] ",
+    "!rmdir <dir>                 - remove directory [RMD] ",
+    "!send <file> <remote-file>   - send file to server [PASV/PORT][STOR <file>]  ",
+    "system                      - show system [SYST]  ",
+    "user                        - login to the server [USER/PASS]",
+  ],
 };
 
 /* sendAction(
@@ -209,3 +245,25 @@ console.log("Welcome to FTPC!");
 // await delay(3000); /// waiting 1 second.
 
 ftpc.run();
+
+/* 
+help:
+binary                      - set to binary mode [TYPE I]
+bye                         - exit()
+cd <dir>                    - cd directory [CWD]
+dir                         - list current directory [PASV/PORT][LIST]
+exit                        - exit() [QUIT]
+get <remote-file> <file>    - get remote-file to file [PASV/PORT][RETR]
+help                        - show this help page 
+ls                          - list current directory [PASV/PORT][LIST]
+login                       - Login to the server   [USER/PASS]
+mkdir <dir>                 - make directory  [MKD]
+passive                     - switch PASV/PORT mode  
+pwd                         - show current directory [PWD]
+quit                        - exit() [QUIT]
+rename <file> <new_name>    - rename file [RNFR/RNTO]
+rmdir <dir>                 - remove directory [RMD]
+send <file> <remote-file>   - send file to server [PASV/PORT][STOR <file>] 
+system                      - show system [SYST] 
+user                        - login to the server [USER/PASS]
+*/

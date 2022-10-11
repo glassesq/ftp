@@ -11,12 +11,6 @@ logger.level = "debug";
  USER: username
  PASS: password
 [RENAME]
- RNFR
- RNTO
-[CD]
-[MKD]
-[RMD]
-[PWD]
 [QUIT/ABOR]
 [SYST] - [TYPE]
 [PASV/PORT mode set]
@@ -158,7 +152,7 @@ const ftpservice = {
   waitReply: function (data) {
     logger.debug("[waitReply] some data come");
     this.buffer = this.buffer.concat(data);
-    // logger.debug(JSON.stringify(this.buffer));
+    logger.debug(JSON.stringify(this.buffer));
 
     const reply = this.checkReply();
     if (reply == null) return;
@@ -168,11 +162,19 @@ const ftpservice = {
     if (!r) logger.warn("[waitReply] callback lost");
     if (reply.kind == "response") this.callbacks.shift();
     r?.(reply);
+
+    if (this.buffer.length > 0) {
+      this.waitReply("");
+    }
   },
   waitData: function (data) {
-    logger.debug("[waitData] some data come");
+    logger.debug("[waitData] some data come" + data.length);
+    console.log(data);
     this.dbuffer = this.dbuffer.concat(data);
     /* big file save. use rv of callback */
+    const r = this.databack;
+    if (!r) logger.warn("[waitData] callback lost");
+    r?.(data);
   },
   handleRmdir: function (action) {
     logger.info("rmdir [" + action.dir + "]");
@@ -191,7 +193,6 @@ const ftpservice = {
   handleCwd: function (action) {
     logger.info("cwd [" + action.dir + "]");
     this.callbacks.push((reply) => {
-      logger.debug("reply" + reply.message);
       this.react?.(genReactionFromReply(reply, false));
     });
     this.writeRaw("CWD " + action.dir + "\r\n");
@@ -202,6 +203,20 @@ const ftpservice = {
       this.react?.(genReactionFromReply(reply, false));
     });
     this.writeRaw("PWD\r\n");
+  },
+  handleSystem: function (action) {
+    logger.info("system");
+    this.callbacks.push((reply) => {
+      this.react?.(genReactionFromReply(reply, false));
+    });
+    this.writeRaw("SYST\r\n");
+  },
+  handleBinary: function (action) {
+    logger.info("binary");
+    this.callbacks.push((reply) => {
+      this.react?.(genReactionFromReply(reply, false));
+    });
+    this.writeRaw("TYPE I\r\n");
   },
   handleUser: function (action) {
     logger.info("user [" + action.username + "] login ");
@@ -245,24 +260,31 @@ const ftpservice = {
   handleList: function (action, step = "mode") {
     if (step == "mode") {
       this.prepareMode((reply) => {
-        console.log("callback", reply);
         this.handleList(action, "list");
       });
     } else if (step == "list") {
       logger.debug("[handleList] list");
       this.callbacks.push((reply) => {
-        if (reply.code == 425 || reply.code == 426) {
-          logger.debug("receive a 425 or 426 code");
-          this.react?.(genReactionFromRepl(reply, false));
-        }
-        if (reply.code == 150) {
+        if (parseInt(reply.code / 100) == 1) {
           this.react?.(genReactionFromReply(reply, true));
-        }
-        if (reply.code == 226) {
+        } else if (reply.code == 226) {
           this.react?.(genReactionFromReply(reply, true));
-          this.handleList(action, "over");
+          console.log(this.d_socket.destroyed);
+          if (this.d_socket.destroyed) {
+            logger.debug("directly");
+            this.handleList(action, "over");
+          } else {
+            this.d_socket.on("close", () => {
+              logger.debug("close received");
+              this.handleList(action, "over");
+            });
+          }
+          this.d_socket.end();
+        } else {
+          this.react?.(genReactionFromReply(reply, false));
         }
       });
+      this.databack = (data) => {};
       this.writeRaw("LIST\r\n");
       // transfer data in data_socket
     } else if (step == "over") {
@@ -287,7 +309,9 @@ const ftpservice = {
   handlePassive: function (action) {
     if (this.mode == "pasv") this.mode = "port";
     else this.mode = "pasv";
-    this.react?.(genReaction("Current mode is " + this.mode.toUpperCase(), false));
+    this.react?.(
+      genReaction("Current mode is " + this.mode.toUpperCase(), false)
+    );
   },
   handleError: function () {
     logger.warn("some error happened");
@@ -297,8 +321,11 @@ const ftpservice = {
     /* checkmode */
     if (this.mode == "pasv") {
       this.callbacks.push((reply) => {
+        if (parseInt(reply.code / 100) != 2) {
+          this.react?.(genReactionFromReply(reply, false));
+          return;
+        }
         logger.debug("[mode prepare]" + reply.genMessage());
-        console.log(reply.message);
         const regex = /((([0-9]{1,3}),){5})([0-9]{1,3})/g;
         const info = reply.message.match(regex)?.[0];
         if (info != null) {
@@ -311,15 +338,15 @@ const ftpservice = {
             "[prepareMode] PASV: " + this.d_pasvhost + ":" + this.d_pasvport
           );
 
-          this.dsocket = net.createConnection(
+          this.d_socket = net.createConnection(
             this.d_pasvport,
-            this.d_pasvip,
+            this.d_pasvhost,
             () => {
-              logger.debug("dsocket connection created.");
+              logger.debug("d_socket connection created.");
               callback?.(reply);
             }
           );
-          this.dsocket.on("data", (data) => this.waitData.bind(this)(data));
+          this.d_socket.on("data", (data) => this.waitData.bind(this)(data));
         }
         // get dserver_host/port from reply.
         logger.debug("[prepareMode] try to call the callback");
@@ -330,8 +357,8 @@ const ftpservice = {
       this.dserver_socket = net.createServer((sock) => {
         // TODO: check permission
         logger.debug("sock got");
-        this.dsocket = sock;
-        this.dsocket.on("data", (data) => this.waitData.bind(this)(data));
+        this.d_socket = sock;
+        this.d_socket.on("data", (data) => this.waitData.bind(this)(data));
         // this.dserver_socket.close();
       });
       this.dserver_socket.maxConnections = 1;
@@ -348,7 +375,10 @@ const ftpservice = {
         msg = msg.replaceAll(".", ",");
         logger.debug("prepare to send " + msg);
         this.callbacks.push((reply) => {
-          logger.debug("port server up.");
+          if (parseInt(reply.code / 100) != 2) {
+            this.react?.(genReactionFromReply(reply, false));
+            return;
+          }
           callback?.(reply);
         });
         this.writeRaw("PORT " + msg + "\r\n");
@@ -419,7 +449,7 @@ function ftpclient() {
   this.server_ip = "0.0.0.0";
   this.server_port = 5001;
   this.ftp_socket = null; /* ftp socket for commands */
-  this.dsocket = null; /* data socket for data transfering */
+  this.d_socket = null; /* data socket for data transfering */
   this.dserver_socket = null; /* data server socket for PORT mode */
   this.dserver_host = null;
   this.dserver_port = null;
@@ -429,6 +459,7 @@ function ftpclient() {
   this.mode = "port"; /* pasv or port */
   this.react = null; /* the react of client outside */
   this.callbacks = []; /* queue when wait for a response*/
+  this.databack = null;
 }
 
 function initFTP() {
