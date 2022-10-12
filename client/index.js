@@ -116,6 +116,33 @@ const ftpc = {
       return;
     }
   },
+  send: function (command) {
+    const action = { action: "Send" };
+    if (command.trim() == "send") {
+      action.local = prompt("(local-file) ");
+      action.remote = prompt("(remote-file) ");
+      if (action.remote.trim() == "")
+        action.remote = action.local.split("/").at(-1);
+    } else {
+      const re = /[\s]+/;
+      console.log(command.trim().split(re));
+      if (command.trim().split(re).length == 2) {
+        action.local = command.trim().split(re).at(-1);
+        action.remote = prompt("(remote-file) ");
+        if (action.remote.trim() == "")
+          action.remote = action.local.split(re).at(-1);
+      } else {
+        action.local = command.trim().split(re).at(-2);
+        action.remote = command.trim().split(re).at(-1);
+      }
+    }
+    if (action.remote.trim() == "" || action.local.trim() == "") {
+      console.log("invalid parameters");
+      this.ftpc_emitter.emit("act");
+      return;
+    }
+    this.client.runAct(action);
+  },
   get: function (command) {
     const action = { action: "Get" };
     if (command.trim() == "get") {
@@ -180,6 +207,8 @@ const ftpc = {
       this.client.runAct({ action: "Binary" });
     } else if (command.startsWith("get")) {
       this.get(command);
+    } else if (command.startsWith("send")) {
+      this.send(command);
     } else if (
       command.startsWith("bye") ||
       command.startsWith("quit") ||

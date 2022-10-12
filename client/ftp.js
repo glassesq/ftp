@@ -1,6 +1,7 @@
 /* FTP Client */
 
 import log4js from "log4js";
+import { Buffer } from "buffer";
 import net from "net";
 import fs from "fs";
 import { EventEmitter } from "events";
@@ -338,6 +339,7 @@ const ftpservice = {
             () => {
               logger.debug("d_socket connection created.");
               callback?.(reply);
+              this.waitData("");
             }
           );
           this.d_socket.on("data", (data) => this.waitData.bind(this)(data));
@@ -363,6 +365,7 @@ const ftpservice = {
           this.dactive = false;
           this.waitReply("");
         });
+        this.waitData("");
         // this.dserver_socket.close();
       });
       this.dserver_socket.maxConnections = 1;
@@ -397,6 +400,62 @@ const ftpservice = {
     } else return false;
     return false;
   },
+  handleSend: function (action, step = "mode") {
+    if (step == "mode") {
+      this.prepareMode((reply) => {
+        this.handleSend(action, "stor");
+      });
+    } else if (step == "stor") {
+      logger.debug("[handleStor] stor");
+      if (!fs.existsSync(action.local)) {
+        this.react?.(
+          genReaction("local file " + action.local + "not exists.", false)
+        );
+        return;
+      }
+      fs.open(action.local, "r", (err, fd) => {
+        if (err) {
+          logger.debug("fs fail to open." + action.local);
+          this.react?.(genReaction("File system not allowed", false));
+          return;
+        }
+        this.fd = fd;
+        this.callbacks.push((reply) => {
+          if (parseInt(reply.code / 100) == 1) {
+            this.react?.(genReactionFromReply(reply, true));
+            this.dactive = true;
+            logger.debug("dactive: true");
+          } else if (reply.code == 226) {
+            this.handleSend(action, "over");
+            this.react?.(genReactionFromReply(reply, false));
+          } else {
+            this.react?.(genReactionFromReply(reply, false));
+          }
+        });
+        this.databack = (data) => {
+          logger.debug(data);
+          while (true) {
+            const buffer = Buffer.alloc(8192);
+            let n = fs.readSync(this.fd, buffer, 0, 8192);
+            if (n <= 0) {
+              break;
+            } else {
+              this.d_socket.write(buffer.subarray(0, n));
+              if (n != 8192) break;
+            }
+          }
+          this.d_socket.end();
+        };
+        this.writeRaw("STOR " + action.remote + "\r\n");
+      });
+      // transfer data in data_socket
+    } else if (step == "over") {
+      logger.log("[handleStor] over");
+      fs.close(this.fd);
+      this.dbuffer = "";
+    }
+  },
+
   handleGet: function (action, step = "mode") {
     if (step == "mode") {
       this.prepareMode((reply) => {
@@ -431,6 +490,7 @@ const ftpservice = {
           }
         });
         this.databack = (data) => {
+          if (data == "") return;
           fs.write(this.fd, data, () => {});
           logger.debug(data);
         };
