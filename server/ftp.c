@@ -28,12 +28,8 @@ void init(void) {
 
 int newBindSocket(int port, char* address) {
   if (address == NULL) {
-    loge("address is NULL when try to make a new socket & bind it");
-    return E_BIND;
+    address = "0.0.0.0";
   }
-
-  // TODO: use the real address
-  logw(formatstr("address [%s] provided, not using it now.", address));
 
   int s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
   if (s < 0) {
@@ -49,8 +45,7 @@ int newBindSocket(int port, char* address) {
     logw(formatstr("port [%d] provided not ok, use any avaialble here", port));
   } else
     addr.sin_port = htons(port);
-  addr.sin_addr.s_addr = htonl(INADDR_ANY);  // inet_addr("127.0.0.1")
-  logd("addr generated");
+  addr.sin_addr.s_addr = inet_addr(address);
 
   /* bind server to its address */
   int ret = bind(s, (struct sockaddr*)&addr, sizeof(addr));
@@ -58,8 +53,6 @@ int newBindSocket(int port, char* address) {
     loge(formatstr("failed to bind to %d", port));
     return E_BIND;
   }
-  logd(formatstr("new socket %d made. bind to port [%d](not-for-sure)", s,
-                 ntohs(addr.sin_port)));
   return s;
 }
 
@@ -75,6 +68,11 @@ int startListen(int port, int connection) {
   } else
     server_socket = ret;
 
+  struct sockaddr_in addr;
+  socklen_t slen = sizeof(addr);
+  getsockname(server_socket, (struct sockaddr*)&addr, &slen);
+  config.ip = inet_ntoa(addr.sin_addr);
+
   /* bind server to its address */
   logi(formatstr("server_socket is ok. it is socket %d", server_socket));
 
@@ -87,7 +85,6 @@ int startListen(int port, int connection) {
 
   while (1) {
     int new_socket = accept(server_socket, NULL, NULL);
-    intd(new_socket);
     logi("some one knock the door, we try to accept it");
     if (new_socket < 0) {
       loge("failed to accept connection");
@@ -117,17 +114,16 @@ int readOneRequest(int sock, char* result) {
   while (1) {
     int n = read(sock, result + count, 1);
     if (n == 0) {
-      logd("read the EOF end but no \\r\\n here");
+      logw("read the EOF end but no \\r\\n here");
       return E_READ_EOF;
     }
     if (n < 0) {
-      logd("read go wrong, mostly beacuse the sock is closed");
+      logw("read go wrong, mostly beacuse the sock is closed");
       return E_READ_WRONG;
     }
 
     if (former_r && result[count] == '\n') {
       result[count + 1] = '\0';
-      logd("one new request read");
       return 1;
     }
 
@@ -183,7 +179,6 @@ void processRaw(char* raw) {
   }
   if (raw[0] == ' ') removeFirstSec(raw, ' ');
   removeFirstChar(raw, ' ');
-  logd(formatstr("raw information: [%s]", raw));
 }
 
 int parseRawRequest(char* raw, struct request* req) {
@@ -269,11 +264,11 @@ int writeRaw(int sock, char* raw) {
                           // for write to be safe
   int n = write(sock, raw, strlen(raw));
   if (n < 0) {
-    logd("write go wrong, mostly beacuse the socket is closed");
+    logw("write go wrong, mostly beacuse the socket is closed");
     return E_WRITE_WRONG;
   }
   if (n < len) {
-    logd("write incomplete");
+    logw("write incomplete");
     return E_WRITE_INCOMP;
   }
   return 1;
@@ -283,7 +278,7 @@ int readBinary(int sock, char* raw, int* len) {
   if (raw == NULL) return E_NULL;
   *len = read(sock, raw, BUFFER_SIZE);
   if (*len < 0) {
-    logd("write go wrong, mostly beacuse the socket is closed");
+    logw("write go wrong, mostly beacuse the socket is closed");
     return E_WRITE_WRONG;
   }
   return 1;
@@ -293,11 +288,11 @@ int writeBinary(int sock, char* raw, int len) {
   if (raw == NULL) return E_NULL;
   int n = write(sock, raw, len);
   if (n < 0) {
-    logd("write go wrong, mostly beacuse the socket is closed");
+    logw("write go wrong, mostly beacuse the socket is closed");
     return E_WRITE_WRONG;
   }
   if (n < len) {
-    logd("write incomplete");
+    logw("write incomplete");
     return E_WRITE_INCOMP;
   }
   return 1;
@@ -306,11 +301,11 @@ int writeBinary(int sock, char* raw, int len) {
 int saveToFile(FILE* f, char* buf, int len) {
   int n = fwrite(buf, 1, len, f);
   if (n < 0) {
-    logd("save go wrong, mostly beacuse the socket is closed");
+    logw("save go wrong, mostly beacuse the socket is closed");
     return E_WRITE_WRONG;
   }
   if (n < len) {
-    logd("save incomplete");
+    logw("save incomplete");
     return E_WRITE_INCOMP;
   }
   return 1;
@@ -358,7 +353,6 @@ int readFile(int sock, char* path) {
 
 int writeFile(int sock, char* path) {
   char buffer[BUFFER_SIZE + 1];
-  logd(path);
   // write it to socket
   // stop when accident happens
   // int fd = open(path, O_RDONLY);
@@ -401,7 +395,7 @@ int greeting(int sock) { return sendReply(sock, REPLY220); }
 void clearConn(int ftp_socket, struct conn_info* info) {
   clearMode(info);
   shutdown(ftp_socket, SHUT_RDWR);
-  // TODO: close needed here?
+  close(ftp_socket);
 }
 
 void runFTP(int ftp_socket, struct conn_info* info) {
@@ -911,7 +905,7 @@ int handleStor(int ftp_socket, struct request req, struct conn_info* info) {
   /* mode check ok, tcp connection is established */
 
   /* File check ok. Now trasfer it. */
-  logd(formatstr("file & mode checked for RETR, we are about to transfer [%s]",
+  logi(formatstr("file & mode checked for RETR, we are about to transfer [%s]",
                  req.params));
   if ((ret = sendReply(ftp_socket, REPLY150)) < 0) {
     loge(formatstr("socket %d close unexpectely", ftp_socket));
@@ -919,7 +913,6 @@ int handleStor(int ftp_socket, struct request req, struct conn_info* info) {
   }
 
   if (info->mode == FTP_M_PORT_WAIT) {
-    logd("port mode: try to prepare socket");
     ret = preparePortSocket(ftp_socket, info);
     if (ret < 0) {
       ret = sendReply(ftp_socket, REPLY425);
@@ -929,7 +922,7 @@ int handleStor(int ftp_socket, struct request req, struct conn_info* info) {
       }
       return E_DSOCKET;
     }
-    logd(formatstr("PORT mode: d_socket %d prepared", info->d_socket));
+    logi(formatstr("PORT mode: d_socket %d prepared", info->d_socket));
   }
 
   int d_socket = info->d_socket;
@@ -1000,7 +993,7 @@ int handleRetr(int ftp_socket, struct request req, struct conn_info* info) {
   }
   /* File check ok. Now trasfer it. */
 
-  logd(formatstr("file & mode checked for RETR, we are about to transfer [%s]",
+  logi(formatstr("file & mode checked for RETR, we are about to transfer [%s]",
                  path));
   if ((ret = sendReply(ftp_socket, REPLY150)) < 0) {
     loge(formatstr("socket %d close unexpectely", ftp_socket));
@@ -1008,7 +1001,6 @@ int handleRetr(int ftp_socket, struct request req, struct conn_info* info) {
   }
 
   if (info->mode == FTP_M_PORT_WAIT) {
-    logd("port mode: try to prepare socket");
     ret = preparePortSocket(ftp_socket, info);
     if (ret < 0) {
       ret = sendReply(ftp_socket, REPLY425);
@@ -1018,7 +1010,7 @@ int handleRetr(int ftp_socket, struct request req, struct conn_info* info) {
       }
       return E_DSOCKET;
     }
-    logd(formatstr("PORT mode: d_socket %d prepared", info->d_socket));
+    logi(formatstr("PORT mode: d_socket %d prepared", info->d_socket));
   }
 
   int d_socket = info->d_socket;
@@ -1064,7 +1056,7 @@ int handleList(int ftp_socket, struct request req, struct conn_info* info) {
   }
   /* mode check ok, tcp connection is established */
 
-  logd(formatstr("mode checked for RETR, we are about to LIST [%s]",
+  logi(formatstr("mode checked for RETR, we are about to LIST [%s]",
                  config.root));
 
   ret = checkWorkDir(info);
@@ -1088,7 +1080,6 @@ int handleList(int ftp_socket, struct request req, struct conn_info* info) {
   }
 
   if (info->mode == FTP_M_PORT_WAIT) {
-    logd("PORT mode: try to prepare socket");
     ret = preparePortSocket(ftp_socket, info);
     if (ret < 0) {
       ret = sendReply(ftp_socket, REPLY425);
@@ -1098,7 +1089,7 @@ int handleList(int ftp_socket, struct request req, struct conn_info* info) {
       }
       return E_DSOCKET;
     }
-    logd(formatstr("PORT mode: d_socket %d prepared", info->d_socket));
+    logi(formatstr("PORT mode: d_socket %d prepared", info->d_socket));
   }
 
   int d_socket = info->d_socket;
@@ -1240,7 +1231,6 @@ int handleMkd(int ftp_socket, struct request req, struct conn_info* info) {
       snprintf(msg, BUFFER_SIZE,
                "Requested action not taken.\r\n[%.255s] already exists\r\n",
                req.params);
-      logd(msg);
       genReply(&r, 550, msg);
       ret = sendReply(ftp_socket, r);
     }
@@ -1294,7 +1284,6 @@ int handleCwd(int ftp_socket, struct request req, struct conn_info* info) {
     snprintf(msg, BUFFER_SIZE,
              "Requested action not taken.\r\n[%.255s] not a directory\r\n",
              req.params);
-    logd(msg);
     genReply(&r, 550, msg);
     ret = sendReply(ftp_socket, r);
     if (ret < 0) {
@@ -1348,7 +1337,6 @@ int handleRmd(int ftp_socket, struct request req, struct conn_info* info) {
     snprintf(msg, BUFFER_SIZE,
              "Requested action not taken.\r\n[%.255s] not a directory\r\n",
              req.params);
-    logd(msg);
     genReply(&r, 550, msg);
     ret = sendReply(ftp_socket, r);
     if (ret < 0) {

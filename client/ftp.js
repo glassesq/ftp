@@ -49,7 +49,6 @@ function FTPReply(code, msg) {
   r.kind = r.code >= 100 && r.code <= 199 ? "mark" : "response";
   if (r.code == 421) r.quit = true;
   else r.quit = false;
-  // parse reply and check respone/mark
   return r;
 }
 
@@ -248,7 +247,6 @@ const ftpservice = {
       logger.debug("[handleRename] rnto");
       this.callbacks.push((reply) => {
         if (parseInt(reply.code / 100) == 2) {
-          // TODO:
           this.react?.(genReactionFromReply(reply, false));
         } else {
           this.react?.(genReactionFromReply(reply, false));
@@ -326,6 +324,9 @@ const ftpservice = {
         if (info != null) {
           const ipre = /((([0-9]{1,3}),){3})([0-9]{1,3})/g;
           this.d_pasvhost = info.match(ipre)?.[0].replaceAll(",", ".");
+          if( this.d_pasvhost.startsWith("0.") || this.d_pasvhost.startsWith("127.") || this.d_pasvhost.startWith("172.") ) {
+            this.pasvhost = this.server_ip;
+          }
           const num = info.split(",");
           this.d_pasvport = parseInt(num.at(-2)) * 256 + parseInt(num.at(-1));
 
@@ -505,14 +506,6 @@ const ftpservice = {
   },
   handleClose: function () {
     logger.info("The FTP service is fully closed");
-  },
-  usePort: function () {
-    logger.info("port mode");
-  },
-  usePasv: function (step = "init", callback = null) {
-    logger.info("port mode[" + step + "] start");
-
-    writeRaw("PASV\r\n");
   },
   killService: function () {
     logger.info("[killService] someone try to kill service");

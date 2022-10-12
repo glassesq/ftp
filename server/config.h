@@ -12,7 +12,7 @@ struct ServerConfig {
   int port;
   char* root;
   int max_connect;   // max connection at the same time
-  char ip[IP_SIZE];  // ip address for the server
+  char* ip;  // ip address for the server
 };
 
 /* config for FTP server */

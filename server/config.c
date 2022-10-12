@@ -16,7 +16,6 @@ int parseArgument(int argc, char* argv[]) {
         loge("invalid argument: port number");
         return 0;
       }
-      logd(formatstr("port number set to %d", config.port));
       cnt += 2;
     } else if (strcmp(argv[cnt], "-root") == 0) {
       if (cnt >= argc - 1) {
@@ -30,14 +29,12 @@ int parseArgument(int argc, char* argv[]) {
         if (ret == E_NOT_DIR) loge("invalid argument: root is not a directory");
         return 0;
       }
-      logd(formatstr("root directory set to %s[absolute]", config.root));
       cnt += 2;
     } else {
       loge("invalid argument: not understand");
       return 0;
     }
   }
-  logd("parse argument FINISH");
   return 1;
 }
 
