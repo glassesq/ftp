@@ -21,6 +21,7 @@ char* getTime(void) {
 }
 
 void logd(char* msg) {
+  return;
   pthread_mutex_lock(&log_mutex);
   if (LOG_FILE == NULL || msg == NULL) return;
   FILE* fp = NULL;
@@ -33,6 +34,7 @@ void logd(char* msg) {
 }
 
 void loge(char* msg) {
+  return;
   pthread_mutex_lock(&log_mutex);
   if (LOG_FILE == NULL || msg == NULL) return;
   FILE* fp = NULL;
@@ -45,6 +47,7 @@ void loge(char* msg) {
 }
 
 void logi(char* msg) {
+  return;
   pthread_mutex_lock(&log_mutex);
   if (LOG_FILE == NULL || msg == NULL) return;
   FILE* fp = NULL;
@@ -57,13 +60,14 @@ void logi(char* msg) {
 }
 
 void logw(char* msg) {
+  return;
   pthread_mutex_lock(&log_mutex);
   if (LOG_FILE == NULL || msg == NULL) return;
   FILE* fp = NULL;
   fp = fopen(LOG_FILE, "a+");
   char* current = getTime();
-  fprintf(fp, "[%s][warning] %s\n", current, msg);
-  printf("[%s][warning] %s\n", current, msg);
+  fprintf(fp, "[%s][warn] %s\n", current, msg);
+  // printf("[%s][warning] %s\n", current, msg);
   fclose(fp);
   pthread_mutex_unlock(&log_mutex);
 }

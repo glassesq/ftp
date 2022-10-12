@@ -6,7 +6,7 @@ import { EventEmitter } from "events";
 const prompt = promptSync();
 
 const logger = log4js.getLogger("ftpc");
-logger.level = "debug";
+// logger.level = "debug";
 
 const ftpc = {
   ftpc_emitter: new EventEmitter(),

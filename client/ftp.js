@@ -7,7 +7,7 @@ import fs from "fs";
 import { EventEmitter } from "events";
 
 const logger = log4js.getLogger("ftp-service");
-logger.level = "debug";
+// logger.level = "debug";
 
 /* gen a react to outside */
 function genReaction(message, wait, kill = false) {

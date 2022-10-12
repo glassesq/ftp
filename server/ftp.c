@@ -340,13 +340,11 @@ int readFile(int sock, char* path) {
         return E_DSOCKET;
       }
     }
-    if (n < BUFFER_SIZE) {
-      /* it reach the file end, EOF will be sent later by shuting down */
+    if (n == 0) {
       break;
     }
   }
-  logi(formatstr("Finished to write file[%s] with %d bytes to socket %d", path,
-                 count, sock));
+  logi(formatstr("Finished to save file[%s] with %d bytes", path, count));
   fclose(f);
   return 1;
 }
@@ -893,8 +891,14 @@ int handleStor(int ftp_socket, struct request req, struct conn_info* info) {
   int ret;
   if ((ret = checkLogin(ftp_socket, info) < 0)) return ret;
 
+  logw("stor");
+  if (info->mode == FTP_M_PASV_LISTEN) {
+    sleep(500);
+  }
+
   if (info->mode != FTP_M_PASV_ACCEPT && info->mode != FTP_M_PORT_WAIT) {
-    logw("tcp connection not prepared");
+    logw(formatstr("mode: %d", info->mode));
+    logw("atcp connection not prepared");
     ret = sendReply(ftp_socket, REPLY425);
     if (ret < 0) {
       loge(formatstr("socket %d close unexpectely", ftp_socket));
@@ -905,7 +909,7 @@ int handleStor(int ftp_socket, struct request req, struct conn_info* info) {
   /* mode check ok, tcp connection is established */
 
   /* File check ok. Now trasfer it. */
-  logi(formatstr("file & mode checked for RETR, we are about to transfer [%s]",
+  logi(formatstr("file & mode checked for STOR, we are about to transfer [%s]",
                  req.params));
   if ((ret = sendReply(ftp_socket, REPLY150)) < 0) {
     loge(formatstr("socket %d close unexpectely", ftp_socket));
@@ -913,8 +917,10 @@ int handleStor(int ftp_socket, struct request req, struct conn_info* info) {
   }
 
   if (info->mode == FTP_M_PORT_WAIT) {
+    logw("port wait");
     ret = preparePortSocket(ftp_socket, info);
     if (ret < 0) {
+      logw("send 425 when port wait");
       ret = sendReply(ftp_socket, REPLY425);
       if (ret < 0) {
         loge(formatstr("socket %d close unexpectely", ftp_socket));
@@ -956,8 +962,11 @@ int handleRetr(int ftp_socket, struct request req, struct conn_info* info) {
   int ret;
   if ((ret = checkLogin(ftp_socket, info) < 0)) return ret;
 
+  logw("retr");
+
   if (info->mode != FTP_M_PASV_ACCEPT && info->mode != FTP_M_PORT_WAIT) {
-    logw("tcp connection not prepared");
+    logw(formatstr("mode: %d", info->mode));
+    logw("btcp connection not prepared");
     ret = sendReply(ftp_socket, REPLY425);
     if (ret < 0) {
       loge(formatstr("socket %d close unexpectely", ftp_socket));
@@ -1001,8 +1010,10 @@ int handleRetr(int ftp_socket, struct request req, struct conn_info* info) {
   }
 
   if (info->mode == FTP_M_PORT_WAIT) {
+    logw("port wait");
     ret = preparePortSocket(ftp_socket, info);
     if (ret < 0) {
+      logw("send 425 when RETR");
       ret = sendReply(ftp_socket, REPLY425);
       if (ret < 0) {
         loge(formatstr("socket %d close unexpectely", ftp_socket));
@@ -1046,7 +1057,8 @@ int handleList(int ftp_socket, struct request req, struct conn_info* info) {
   if ((ret = checkLogin(ftp_socket, info) < 0)) return ret;
 
   if (info->mode != FTP_M_PASV_ACCEPT && info->mode != FTP_M_PORT_WAIT) {
-    logw("tcp connection not prepared");
+    logw(formatstr("mode: %d", info->mode));
+    logw("ctcp connection not prepared");
     ret = sendReply(ftp_socket, REPLY425);
     if (ret < 0) {
       loge(formatstr("socket %d close unexpectely", ftp_socket));
@@ -1082,6 +1094,7 @@ int handleList(int ftp_socket, struct request req, struct conn_info* info) {
   if (info->mode == FTP_M_PORT_WAIT) {
     ret = preparePortSocket(ftp_socket, info);
     if (ret < 0) {
+      logw("send 425 when port wait");
       ret = sendReply(ftp_socket, REPLY425);
       if (ret < 0) {
         loge(formatstr("socket %d close unexpectely", ftp_socket));
